@@ -604,9 +604,9 @@ var AGSCore = (function () {
   var APP_NAME = 'Operations Hub';
 
   // ------------------------------------------------------------------ roles
-  var ROLES = { ADMIN: 'ADMIN', EXEC: 'EXECUTIVE', AM: 'ACCOUNT_MANAGER', SUP: 'SUPERVISOR' };
-  var ROLE_LABELS = { ADMIN: 'Admin', EXECUTIVE: 'Executive', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor' };
-  var ASSIGNABLE_ROLES = ['ADMIN', 'EXECUTIVE', 'ACCOUNT_MANAGER', 'SUPERVISOR'];
+  var ROLES = { ADMIN: 'ADMIN', EXEC: 'EXECUTIVE', AM: 'ACCOUNT_MANAGER', SUP: 'SUPERVISOR', HR: 'HR' };
+  var ROLE_LABELS = { ADMIN: 'Admin', EXECUTIVE: 'Executive', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor', HR: 'HR' };
+  var ASSIGNABLE_ROLES = ['ADMIN', 'EXECUTIVE', 'ACCOUNT_MANAGER', 'SUPERVISOR', 'HR'];
   var CAMPAIGN_ROLES = ['SUPERVISOR'];            // supervisors: Users.CampaignIDs; account managers: Campaigns.AccountManagerIDs
 
   // ------------------------------------------------------------------ lists (editable later in Settings → Settings)
@@ -837,24 +837,27 @@ var AGSCore = (function () {
   function isExec(u) { return !!u && u.role === ROLES.EXEC; }
   function isAM(u) { return !!u && u.role === ROLES.AM; }
   function isSup(u) { return !!u && u.role === ROLES.SUP; }
-  // What each role may change: Admin all; Account managers everything in their campaigns; Supervisors issues, escalations and IRs.
+  function isHR(u) { return !!u && u.role === ROLES.HR; }
+  // What each role may change: Admin all; Account managers everything in their campaigns; Supervisors issues, escalations and IRs;
+  // HR: IRs, grievances and the agent roster (separations and hire dates for attrition), in all campaigns.
   function canWrite(u, entity) {
     if (isAdmin(u)) return true;
     if (isAM(u)) return ['agents', 'issues', 'escalations', 'irs', 'grievances', 'kpiRows'].indexOf(entity) >= 0;
     if (isSup(u)) return ['issues', 'escalations', 'irs'].indexOf(entity) >= 0;
+    if (isHR(u)) return ['irs', 'grievances', 'agents'].indexOf(entity) >= 0;
     return false;
   }
-  function canSeeGrievances(u) { return isAdmin(u) || isExec(u) || isAM(u); }
+  function canSeeGrievances(u) { return isAdmin(u) || isExec(u) || isAM(u) || isHR(u); }
   function capabilities(u) {
     return { writeLogs: canWrite(u, 'issues'), writeKpis: canWrite(u, 'kpiRows'), writeAgents: canWrite(u, 'agents'), grievances: canSeeGrievances(u), writeGrievances: canWrite(u, 'grievances'),
-      manageUsers: isAdmin(u), manageCampaigns: isAdmin(u), manageGuides: isAdmin(u), viewAudit: isAdmin(u), manageSync: isAdmin(u), archive: isAdmin(u), export: !!u, viewSettings: isAdmin(u) || isAM(u) };
+      manageUsers: isAdmin(u), manageCampaigns: isAdmin(u), manageGuides: isAdmin(u), viewAudit: isAdmin(u), manageSync: isAdmin(u), archive: isAdmin(u), export: !!u, viewSettings: isAdmin(u) || isAM(u) || isHR(u) };
   }
 
   // ------------------------------------------------------------------ data scope (server-enforced)
-  // Admin and Executive: all campaigns. Account manager: campaigns listing them in AccountManagerIDs.
+  // Admin, Executive and HR: all campaigns. Account manager: campaigns listing them in AccountManagerIDs.
   // Supervisor: Users.CampaignIDs. Grievances: never sent to supervisors.
   function buildScope(repo, u) {
-    if (isAdmin(u) || isExec(u)) return { all: true, grievances: true };
+    if (isAdmin(u) || isExec(u) || isHR(u)) return { all: true, grievances: true };
     var sc = { all: false, camps: {}, grievances: canSeeGrievances(u) };
     if (isAM(u)) repo.all('campaigns').forEach(function (c) { if (splitIds(c.AccountManagerIDs).indexOf(u.userId) >= 0) sc.camps[c.CampaignID] = true; });
     else (u.campaignIds || []).forEach(function (c) { sc.camps[c] = true; });
@@ -1362,6 +1365,7 @@ var AGSCore = (function () {
     var camp = {};
     CAMPAIGN_NAMES.forEach(function (nm) { var c = rec('campaigns', { Name: nm, Status: 'Active', AccountManagerIDs: ams[nm].map(function (u) { return u.UserID; }).join(','), Description: '' }, year + '-01-02'); D.campaigns.push(c); camp[nm] = c; });
     U('rafael.mendoza@example.com', 'Rafael Mendoza', 'SUPERVISOR', { CampaignIDs: [camp.Legacy.CampaignID, camp.Banyan.CampaignID].join(',') });
+    U('lorna.diaz@example.com', 'Lorna Diaz', 'HR');
     startingGuides().forEach(function (g) { D.kpiGuides.push(rec('kpiGuides', { CampaignID: camp[g[0]].CampaignID, Name: g[1], Shift: g[2], Profile: g[3], EffectiveFrom: year + '-01', Definition: JSON.stringify(g[4]), Active: 'TRUE' }, year + '-01-02')); });
     // agents
     var first = ['Bea', 'Carlo', 'Dana', 'Elijah', 'Faye', 'Gino', 'Hazel', 'Ivan', 'Jasmine', 'Kevin', 'Lara', 'Miguel', 'Nina', 'Oscar', 'Paula', 'Quinn', 'Rina', 'Sam', 'Tess', 'Ulysses', 'Vina', 'Warren', 'Ysa', 'Zack'];
@@ -1429,7 +1433,7 @@ var AGSCore = (function () {
     AgsError: AgsError, s: s, n: n, b: b, isIsoDate: isIsoDate, addDays: addDays, diffDays: diffDays, json: json, arr: arr, rate: rate, fmtRate: fmtRate, round: round, clone: clone,
     isEmail: isEmail, live: live, blank: blank, byKey: byKey, splitIds: splitIds, settingsWithDefaults: settingsWithDefaults, normRole: normRole, periodOf: periodOf, daysInMonth: daysInMonth,
     sanitize: sanitize, parseRaw: parseRaw, fmtTime: fmtTime, fmtKpi: fmtKpi, evalFormula: evalFormula, gradeFor: gradeFor, scoreRow: scoreRow, validateGuide: validateGuide, guideFor: guideFor,
-    isAdmin: isAdmin, isExec: isExec, isAM: isAM, isSup: isSup, canWrite: canWrite, canSeeGrievances: canSeeGrievances, capabilities: capabilities, buildScope: buildScope, inScope: inScope,
+    isAdmin: isAdmin, isExec: isExec, isAM: isAM, isSup: isSup, isHR: isHR, canWrite: canWrite, canSeeGrievances: canSeeGrievances, capabilities: capabilities, buildScope: buildScope, inScope: inScope,
     buildIndex: buildIndex, monthAdd: monthAdd, monthEnd: monthEnd, isOpen: isOpen, dateOf: dateOf, daysOpen: daysOpen, overdue: overdue, lastUpdate: lastUpdate,
     kpiCampaign: kpiCampaign, kpiOverview: kpiOverview, logSummary: logSummary, headcountOn: headcountOn, attrition: attrition, accountManagers: accountManagers, accountableNames: accountableNames, needsAttention: needsAttention,
     csvCell: csvCell, toCsv: toCsv, handle: handle, resolveUser: resolveUser, publicUser: publicUser, generateSynthetic: generateSynthetic,
@@ -1973,9 +1977,9 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       try {
         S.demoT = S.demoT || new DemoTransport();
         var repo = S.demoT.repo, camps = C.byKey(repo.all('campaigns'), 'CampaignID');
-        var rank = { EXECUTIVE: 0, ADMIN: 1, ACCOUNT_MANAGER: 2, SUPERVISOR: 3 };
+        var rank = { EXECUTIVE: 0, ADMIN: 1, ACCOUNT_MANAGER: 2, SUPERVISOR: 3, HR: 4 };
         var users = S.demoT.users().filter(function (u) { return C.ASSIGNABLE_ROLES.indexOf(C.normRole(u.Role)) >= 0; }).sort(function (a, b) { var x = rank[C.normRole(a.Role)], y = rank[C.normRole(b.Role)]; return x !== y ? x - y : (a.DisplayName < b.DisplayName ? -1 : 1); });
-        var roleSub = { ADMIN: 'Admin, all campaigns', EXECUTIVE: 'Executive, all campaigns (view only)', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor' };
+        var roleSub = { ADMIN: 'Admin, all campaigns', EXECUTIVE: 'Executive, all campaigns (view only)', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor', HR: 'HR, all campaigns: IRs, grievances, separations' };
         demoHtml = '<section class="login-card" aria-labelledby="demo-h"><h2 id="demo-h">Explore with synthetic data</h2><p class="muted small">Every person and number in the demo is invented. Demo changes stay in this browser and never reach Google Sheets. Choose who to act as:</p><div class="demo-users">' +
           users.map(function (u) {
             var sub = (roleSub[C.normRole(u.Role)] || u.Role) + (C.splitIds(u.CampaignIDs).length ? ': ' + C.splitIds(u.CampaignIDs).map(function (c) { return (camps[c] || {}).Name || c; }).join(', ') : '') + (C.normRole(u.Role) === 'ACCOUNT_MANAGER' ? ': ' + repo.all('campaigns').filter(function (c) { return C.splitIds(c.AccountManagerIDs).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') : '');
@@ -2532,7 +2536,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         }).join('');
     },
     users: function () {
-      return '<div class="page-head"><div><p>Only active users listed here can sign in. Executive: sees everything, changes nothing. Admin: everything. Account manager: their campaigns (set on each campaign). Supervisor: assigned campaigns; issues, escalations and IRs; no grievances.</p></div><div class="actions"><button class="btn btn-primary" data-act="editUser">Add user</button></div></div>' +
+      return '<div class="page-head"><div><p>Only active users listed here can sign in. Executive: sees everything, changes nothing. Admin: everything. Account manager: their campaigns (set on each campaign). Supervisor: assigned campaigns; issues, escalations and IRs; no grievances. HR: all campaigns; logs IRs and grievances and records separations; views everything else.</p></div><div class="actions"><button class="btn btn-primary" data-act="editUser">Add user</button></div></div>' +
         '<section class="panel">' + tblS(['Name', 'Email', 'Role', 'Campaigns', 'Access', ''], S.data.users.filter(C.live).sort(function (a, b) { return a.DisplayName < b.DisplayName ? -1 : 1; }).map(function (u) {
           var r = C.normRole(u.Role), camps = r === 'ACCOUNT_MANAGER' ? liveCamps().filter(function (c) { return C.splitIds(c.AccountManagerIDs).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') || 'none yet' : r === 'SUPERVISOR' ? C.splitIds(u.CampaignIDs).map(campName).join(', ') : 'All';
           return [{ html: '<b>' + esc(u.DisplayName) + '</b>' }, u.Email, C.ROLE_LABELS[r] || u.Role, camps, C.b(u.Active) ? 'Active' : 'Inactive', editBtn('editUser', u.UserID)];
@@ -2580,7 +2584,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     simpleForm({ title: u ? 'Edit user' : 'Add user', rec: u, idKey: 'UserID', action: 'saveUser', done: 'User saved.', fields: [
       { k: 'Email', label: 'Company Google account email', type: 'email', req: true, disabled: self }, { k: 'DisplayName', label: 'Display name', req: true, max: 120 },
       { k: 'Role', label: 'Role', type: 'select', req: true, disabled: self, options: opts(C.ASSIGNABLE_ROLES.map(function (r) { return [r, C.ROLE_LABELS[r]]; }), u ? C.normRole(u.Role) : 'ACCOUNT_MANAGER'),
-        hint: 'Executive: view only, everything. Account manager: assign their campaigns under Campaigns. Supervisor: tick their campaigns below.' },
+        hint: 'Executive: view only, everything. Account manager: assign their campaigns under Campaigns. Supervisor: tick their campaigns below. HR: all campaigns; IRs, grievances and separations.' },
       { k: 'CampaignIDs', label: 'Campaigns (Supervisors)', type: 'checks', span: 'span2', options: liveCamps().map(function (c) { return '<label class="check"><input type="checkbox" value="' + esc(c.CampaignID) + '"' + (cids.indexOf(c.CampaignID) >= 0 ? ' checked' : '') + '> ' + esc(c.Name) + '</label>'; }).join('') },
       { k: 'Active', label: 'Access', type: 'bool', text: 'Active (can sign in)', def: true, disabled: self }],
       extra: self ? '<div class="note" style="margin-top:12px">Your own role, email and access can only be changed by another Admin.</div>' : '',

@@ -2431,7 +2431,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var complete = rowsAll.filter(function (r) { var g = C.json(r.Grades, {}); return g._complete >= g._of; }).length, low = rowsAll.filter(function (r) { return r.TotalGrade !== '' && +r.TotalGrade < 2.5; }).length;
     var strip = '<div class="kpi-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">' +
       '<div class="kpi"><span class="k-label">Average overall</span><span class="k-value">' + (sum ? sum.total.toFixed(2) : '—') + '</span><span class="k-sub">' + (sum && prev ? deltaTxt(C.round(sum.total - prev.total, 2)) + ' vs ' + esc(monthLabel(C.monthAdd(month, -1)).split(' ')[0]) : '&nbsp;') + '</span></div>' +
-      '<div class="kpi"><span class="k-label">Agents graded</span><span class="k-value">' + rowsAll.length + '</span><span class="k-sub">' + complete + ' complete (3 of 3)</span></div>' +
+      '<div class="kpi"><span class="k-label">Agents graded</span><span class="k-value">' + rowsAll.length + '</span><span class="k-sub">this month</span></div>' +
       '<div class="kpi"><span class="k-label">Overall 4 and above</span><span class="k-value">' + (sum ? sum.dist[3] + sum.dist[4] : 0) + '</span><span class="k-sub">agents</span></div>' +
       '<div class="kpi"><span class="k-label">Overall below 2.5</span><span class="k-value ' + (low ? 'g-bad' : '') + '">' + low + '</span><span class="k-sub">agents</span></div></div>';
     var tables = guides.map(function (g) {
@@ -2446,12 +2446,12 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         var r = x.r, vals = r ? C.json(r.Values, {}) : {}, grades = r ? C.json(r.Grades, {}) : {}, of = (perfK.length ? 1 : 0) + (attK2 ? 1 : 0) + (qaK2 ? 1 : 0), done = r ? (grades._complete || 0) : 0;
         return '<tr class="' + (done < of ? 'inc' : '') + '"><td class="muted">' + (idx + 1) + '</td><td><div class="t-title">' + esc(x.a.FullName) + '</div><div class="t-sub">' + esc(x.a.EmployeeID || '') + '</div></td>' +
           perfK.map(function (k) { return cell(k, vals, grades); }).join('') + '<td class="c">' + (r ? chip(grades._perf) : '<span class="gchip none">—</span>') + '</td>' + cell(attK2, vals, grades) + cell(qaK2, vals, grades) +
-          '<td class="c">' + (r ? chip(x.total, true) : '<span class="gchip none">—</span>') + '</td><td class="c"><span class="cchip' + (done >= of ? ' ok' : '') + '">' + done + ' of ' + of + '</span></td></tr>';
+          '<td class="c">' + (r ? chip(x.total, true) : '<span class="gchip none">—</span>') + '</td></tr>';
       }).join('');
       return '<section class="panel" style="margin-bottom:16px"><div class="panel-h"><div><h2>' + esc(g.Name) + '</h2><span class="sub">Performance 50%: ' + esc(perfK.map(function (k) { return k.label; }).join(', ')) + ' · Attendance 25% · ' + esc(qaK2 ? qaK2.label : 'QA') + ' 25% · score guide from ' + esc(monthLabel(g.EffectiveFrom)) + '</span></div>' +
         (cap('writeKpis') ? '<button class="btn btn-sm" data-act="enterKpis" data-guide="' + esc(g.GuideID) + '">Enter KPIs</button>' : '') + '</div>' +
         (list.length ? '<div class="table-wrap"><table class="t sc-t"><thead><tr><th>#</th><th>Agent</th>' + perfK.map(function (k) { return '<th class="c">' + esc(k.label) + '</th>'; }).join('') +
-          '<th class="c">Perf</th><th class="c">Attnd</th><th class="c">' + esc(qaK2 ? qaK2.label : 'QA') + '</th><th class="c"><button class="th-btn" data-act="kpiSort" data-k="overall">Overall' + (f.sort === 'overall' ? (f.dir > 0 ? ' ▲' : ' ▼') : '') + '</button></th><th class="c">Complete</th></tr></thead><tbody>' + body + '</tbody></table></div>'
+          '<th class="c">Perf</th><th class="c">Attnd</th><th class="c">' + esc(qaK2 ? qaK2.label : 'QA') + '</th><th class="c"><button class="th-btn" data-act="kpiSort" data-k="overall">Overall' + (f.sort === 'overall' ? (f.dir > 0 ? ' ▲' : ' ▼') : '') + '</button></th></tr></thead><tbody>' + body + '</tbody></table></div>'
           : emptyState('No agents for this score guide', 'Check each agent\'s shift and profile in Settings → Agents.')) + '</section>';
     }).join('');
     return head + strip + tables;

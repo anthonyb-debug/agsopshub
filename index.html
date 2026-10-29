@@ -943,11 +943,12 @@ var AGSCore = (function () {
     return { agents: rows.length, total: round(rows.reduce(function (a, r) { return a + n(r.TotalGrade); }, 0) / rows.length, 2), att: avg('att'), qa: avg('qa'), dist: dist };
   }
   function kpiOverview(data, month, campaignId) {
+    // Inactive campaigns are left out, except in months where they still have KPI results (their history stays visible).
     return (data.campaigns || []).filter(function (c) { return live(c) && (!campaignId || c.CampaignID === campaignId); }).map(function (c) {
       var cur = kpiCampaign(data, c.CampaignID, month), prev = kpiCampaign(data, c.CampaignID, monthAdd(month, -1));
       var hasGuide = (data.kpiGuides || []).some(function (g) { return live(g) && g.CampaignID === c.CampaignID; });
-      return { campaignId: c.CampaignID, name: c.Name, setup: hasGuide, cur: cur, prev: prev, delta: cur && prev ? round(cur.total - prev.total, 2) : null };
-    });
+      return { campaignId: c.CampaignID, name: c.Name, inactive: c.Status === 'Inactive', setup: hasGuide, cur: cur, prev: prev, delta: cur && prev ? round(cur.total - prev.total, 2) : null };
+    }).filter(function (k) { return !k.inactive || k.cur; });
   }
 
   // ---------- logs ----------
@@ -984,7 +985,7 @@ var AGSCore = (function () {
   // ---------- accountability ----------
   function accountManagers(data, month, today, st) {
     var users = byKey(data.users || [], 'UserID'), map = {};
-    (data.campaigns || []).filter(live).forEach(function (c) { splitIds(c.AccountManagerIDs).forEach(function (uid) { (map[uid] = map[uid] || []).push(c.CampaignID); }); });
+    (data.campaigns || []).filter(function (c) { return live(c) && c.Status !== 'Inactive'; }).forEach(function (c) { splitIds(c.AccountManagerIDs).forEach(function (uid) { (map[uid] = map[uid] || []).push(c.CampaignID); }); });
     return Object.keys(map).map(function (uid) {
       var cids = map[uid], inC = function (r) { return live(r) && cids.indexOf(r.CampaignID) >= 0; };
       var kp = cids.map(function (c) { return kpiCampaign(data, c, month); }).filter(Boolean), agents = kp.reduce(function (a, k) { return a + k.agents; }, 0);
@@ -1798,6 +1799,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   function agName(id) { return ag(id).FullName || id || '—'; }
   function campName(id) { return id === 'ALL' ? 'All campaigns' : ((S.idx.camps[id] || {}).Name || id || '—'); }
   function liveCamps() { return S.data.campaigns.filter(C.live); }
+  function activeCamps() { return liveCamps().filter(function (c) { return c.Status !== 'Inactive'; }); }
   function campCats(cid) {
     if (cid) return C.arr((S.idx.camps[cid] || {}).Categories);
     var all = []; liveCamps().forEach(function (c) { C.arr(c.Categories).forEach(function (x) { if (all.indexOf(x) < 0) all.push(x); }); }); return all.sort();
@@ -2168,7 +2170,8 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     return opts(S.data.agents.filter(function (a) { return C.live(a) && (!campaignId || a.CampaignID === campaignId) && (!activeOnly || !a.SeparationDate || a.AgentID === sel); })
       .sort(function (a, b) { return a.FullName < b.FullName ? -1 : 1; }).map(function (a) { return [a.AgentID, a.FullName + (campaignId ? '' : ' — ' + campName(a.CampaignID))]; }), sel, blank);
   }
-  function campOpts(sel, blank, activeOnly) { return opts(liveCamps().filter(function (c) { return !activeOnly || c.Status === 'Active' || c.CampaignID === sel; }).map(function (c) { return [c.CampaignID, c.Name]; }), sel, blank); }
+  // Inactive campaigns are not offered (unless already selected); Settings → Campaigns still lists them.
+  function campOpts(sel, blank) { return opts(liveCamps().filter(function (c) { return c.Status !== 'Inactive' || c.CampaignID === sel; }).map(function (c) { return [c.CampaignID, c.Name]; }), sel, blank); }
   function pf(page, defaults) { if (!S.f[page]) S.f[page] = Object.assign({}, defaults); else Object.keys(defaults).forEach(function (k) { if (!(k in S.f[page])) S.f[page][k] = defaults[k]; }); return S.f[page]; }
   function fsel(page, key, label, optionsHtml) { var id = 'pf-' + page + '-' + key; return '<div class="f"><label for="' + id + '">' + esc(label) + '</label><select id="' + id + '" class="input input-sm" data-change="pf" data-page="' + page + '" data-key="' + key + '">' + optionsHtml + '</select></div>'; }
   function ftext(page, key, label, value, ph) { var id = 'pf-' + page + '-' + key; return '<div class="f"><label for="' + id + '">' + esc(label) + '</label><input id="' + id + '" class="input input-sm" type="search" data-input="pfText" data-page="' + page + '" data-key="' + key + '" value="' + esc(value) + '" placeholder="' + esc(ph || '') + '"></div>'; }
@@ -2302,6 +2305,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var act = document.activeElement, keepId = act && act.id && $('#page').contains(act) ? act.id : null, selStart = keepId && act.selectionStart;
     var fuMine = myOpenFollowUps().length;
     $('#nav').innerHTML = navList().map(function (n) { return '<li><button data-act="nav" data-page="' + n[0] + '"' + (n[0] === page ? ' aria-current="page"' : '') + ' title="' + n[1] + '">' + icon(n[2]) + '<span class="nav-label">' + n[1] + (n[0] === 'followups' && fuMine ? ' <span class="nav-count">' + fuMine + '</span>' : '') + '</span></button></li>'; }).join('');
+    var gc = $('#g-camp'), gcHtml = campOpts(S.g.campaignId, 'All campaigns'); if (gc && gc.dataset.opts !== gcHtml) { gc.innerHTML = gcHtml; gc.dataset.opts = gcHtml; }   // campaigns can change status
     $('#g-month').style.visibility = MONTH_PAGES[page] ? 'visible' : 'hidden';
     $('#g-camp').style.visibility = page === 'settings' ? 'hidden' : 'visible';
     $('#page-title').textContent = TITLES[page];
@@ -2397,8 +2401,8 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   function kpiCampaignId(f) {
     var cid = S.g.campaignId || f.campaignId;
     if (cid && S.idx.camps[cid]) return cid;
-    var withGuide = liveCamps().filter(function (c) { return S.data.kpiGuides.some(function (g) { return C.live(g) && g.CampaignID === c.CampaignID; }); });
-    return (withGuide[0] || liveCamps()[0] || {}).CampaignID || '';
+    var withGuide = activeCamps().filter(function (c) { return S.data.kpiGuides.some(function (g) { return C.live(g) && g.CampaignID === c.CampaignID; }); });
+    return (withGuide[0] || activeCamps()[0] || {}).CampaignID || '';
   }
   function guidesFor(cid) { return S.data.kpiGuides.filter(function (g) { return C.live(g) && C.b(g.Active) && g.CampaignID === cid; }); }
   function inForce(cid, month) {   // the guides in force this month, one per shift/profile
@@ -2616,7 +2620,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     };
   }
   function recordForm(entity, r) {
-    var cfg = LOGCFG[entity], isNew = !r, v = r || {}, cid = v.CampaignID || S.g.campaignId || (liveCamps()[0] || {}).CampaignID || '';
+    var cfg = LOGCFG[entity], isNew = !r, v = r || {}, cid = v.CampaignID || S.g.campaignId || (activeCamps()[0] || {}).CampaignID || '';
     var input = function (x) {
       var id = 'rf-' + x[0], val = v[x[0]] !== undefined ? v[x[0]] : (x[2] === 'date' && x[3] ? S.today : ''), lbl = '<label class="lbl' + (x[3] ? ' req' : '') + '" for="' + id + '">' + esc(x[1]) + '</label>', ctl;
       if (x[2] === 'camp') ctl = '<select id="' + id + '" class="input" data-k="' + x[0] + '">' + campOpts(cid, 'Select campaign') + '</select>';
@@ -2647,7 +2651,8 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var seps = S.data.agents.filter(function (x) { return C.live(x) && x.SeparationDate && x.SeparationDate.slice(0, 4) === month.slice(0, 4) && x.SeparationDate.slice(0, 7) <= month && (!cid || x.CampaignID === cid); }).sort(function (x, y) { return x.SeparationDate < y.SeparationDate ? 1 : -1; });
     var byType = {}; seps.forEach(function (x) { byType[x.SeparationType || 'Other'] = (byType[x.SeparationType || 'Other'] || 0) + 1; });
     var k = function (l, v, s2) { return '<div class="kpi"><span class="k-label">' + esc(l) + '</span><span class="k-value">' + v + '</span><span class="k-sub">' + esc(s2) + '</span></div>'; };
-    var camps = (cid ? liveCamps().filter(function (c) { return c.CampaignID === cid; }) : liveCamps()).map(function (c) { var x = C.attrition(S.data, month, c.CampaignID); return { c: c, x: x }; });
+    var camps = (cid ? liveCamps().filter(function (c) { return c.CampaignID === cid; }) : liveCamps()).map(function (c) { var x = C.attrition(S.data, month, c.CampaignID); return { c: c, x: x }; })
+      .filter(function (y) { return y.c.Status !== 'Inactive' || y.x.headcount || y.x.ytdSeparations; });
     return '<div class="page-head"><div><p>From the agent roster: an agent counts from their hire date until their separation date. Monthly attrition = separations ÷ average of the headcount at the start and end of the month.</p></div><div class="actions">' + (cap('writeAgents') ? '<button class="btn btn-primary" data-act="recordSep">Record a separation</button>' : '') + '</div></div>' +
       '<div class="kpi-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">' + k('Headcount', cur.headEnd, 'at the end of ' + monthLabel(month)) + k('Separations', cur.separations, monthLabel(month)) + k('Attrition', cur.rate === null ? '—' : cur.rate.toFixed(1) + '%', monthLabel(month)) + k('Year to date', a.ytdRate === null ? '—' : a.ytdRate.toFixed(1) + '%', a.ytdSeparations + ' separations since January') + '</div>' +
       '<div class="grid g-2"><section class="panel"><div class="panel-h"><h2>By month</h2></div><div class="table-wrap"><table class="t"><thead><tr><th>Month</th><th class="num">Start</th><th class="num">End</th><th class="num">Separations</th><th class="num">Attrition</th></tr></thead><tbody>' +

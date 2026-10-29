@@ -509,6 +509,10 @@ button.kpi{border:0;text-align:left;font:inherit;color:inherit;cursor:pointer;ba
 .tb-title{display:flex;flex-direction:column;min-width:0;margin-right:auto} .tb-title h1{margin:0} .tb-sub{font-size:12px;color:var(--muted)}
 .th-btn{border:0;background:none;font:inherit;color:inherit;cursor:pointer;padding:0;font-weight:inherit}
 
+.nav-count{display:inline-block;min-width:18px;padding:0 6px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;text-align:center;margin-left:4px}
+.fu-box{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;margin-top:14px;background:var(--surface-2)}
+.linkish{border:0;background:none;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-align:left;text-decoration:underline}
+.thread{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px} .thread li{border-radius:10px;padding:8px 12px;background:var(--surface-2);border:1px solid var(--line-2)} .thread li.answer{background:var(--accent-soft);border-color:transparent;margin-left:28px}
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
   .kpi-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -635,6 +639,7 @@ var AGSCore = (function () {
     Grievances: ['GrievanceID', 'CampaignID', 'AgentID', 'ReceivedDate', 'Category', 'Details', 'HandledBy', 'Status', 'Resolution', 'ResolvedDate', 'Updates'].concat(META),
     KpiGuides: ['GuideID', 'CampaignID', 'Name', 'Shift', 'Profile', 'EffectiveFrom', 'Definition', 'Active'].concat(META),
     KpiRows: ['RowID', 'CampaignID', 'AgentID', 'Month', 'Shift', 'Profile', 'GuideID', 'Raw', 'Values', 'Grades', 'TotalGrade', 'Source'].concat(META),
+    FollowUps: ['FollowUpID', 'Entity', 'RecordID', 'CampaignID', 'Title', 'Question', 'ToIDs', 'DueDate', 'Status', 'Thread', 'ClosedAt'].concat(META),
     Users: ['UserID', 'Email', 'DisplayName', 'Role', 'CampaignIDs', 'Active'].concat(META),
     AuditLog: ['AuditID', 'Timestamp', 'ActorEmail', 'ActorRole', 'Action', 'EntityType', 'EntityID', 'RequestID', 'ChangedFields', 'Details'],
     SyncLog: ['SyncID', 'Timestamp', 'ActorEmail', 'Action', 'RequestID', 'Status', 'DurationMs', 'EntityType', 'EntityID', 'Message'],
@@ -649,16 +654,21 @@ var AGSCore = (function () {
     grievances: { sheet: 'Grievances', id: 'GrievanceID', prefix: 'GR', yearly: true, label: 'Grievance' },
     kpiGuides: { sheet: 'KpiGuides', id: 'GuideID', prefix: 'KG', yearly: false, label: 'Score guide' },
     kpiRows: { sheet: 'KpiRows', id: 'RowID', prefix: 'KR', yearly: true, label: 'KPI row' },
+    followUps: { sheet: 'FollowUps', id: 'FollowUpID', prefix: 'FU', yearly: true, label: 'Follow-up' },
     users: { sheet: 'Users', id: 'UserID', prefix: 'USR', yearly: false, label: 'User' }
   };
-  var DATA_ENTITIES = ['campaigns', 'agents', 'issues', 'escalations', 'irs', 'grievances', 'kpiGuides', 'kpiRows'];
+  var DATA_ENTITIES = ['campaigns', 'agents', 'issues', 'escalations', 'irs', 'grievances', 'kpiGuides', 'kpiRows', 'followUps'];
+  var FOLLOWUP_STATUS = ['Waiting', 'Answered', 'Closed'];
   var LOGS = ['issues', 'escalations', 'irs', 'grievances'];
   var DEFAULT_SETTINGS = {
     Timezone: ['Asia/Manila', 'IANA timezone used for "today" and display.'],
     Environment: ['PROTOTYPE', 'PROTOTYPE or PRODUCTION. Destructive synthetic-data functions refuse to run in PRODUCTION.'],
     IRPendingDays: ['7', 'An IR pending longer than this many days is flagged on the overview.'],
     GrievanceDays: ['14', 'A grievance open longer than this many days is flagged on the overview.'],
-    EscalationStaleDays: ['3', 'An open escalation with no update for this many days is flagged.']
+    EscalationStaleDays: ['3', 'An open escalation with no update for this many days is flagged.'],
+    FollowUpDays: ['3', 'Default number of days to answer a follow-up request.'],
+    AppUrl: ['', 'The address of this app (e.g. https://agsopshub.vercel.app). Used for links in emails.'],
+    WeeklySummaryTo: ['', 'Who receives the Monday summary email: comma-separated emails. Empty = every active Executive.']
   };
   // ------------------------------------------------------------------ helpers
   function AgsError(code, message, details) { var e = new Error(message); e.name = 'AgsError'; e.agsCode = code; e.details = details || null; return e; }
@@ -863,6 +873,7 @@ var AGSCore = (function () {
   function inScope(sc, entity, r) {
     if (!r) return false;
     if (entity === 'grievances' && !sc.grievances) return false;
+    if (entity === 'followUps' && r.Entity === 'grievances' && !sc.grievances) return false;
     if (sc.all) return true;
     return !!sc.camps[r.CampaignID];
   }
@@ -949,6 +960,10 @@ var AGSCore = (function () {
     return c ? splitIds(c.AccountManagerIDs).map(function (u) { return (users[u] || {}).DisplayName || u; }) : [];
   }
 
+  // ---------- follow-ups ----------
+  function fuOverdue(r, today) { return live(r) && r.Status === 'Waiting' && isIsoDate(r.DueDate) && r.DueDate < today; }
+  function followUpsFor(data, entity, id) { return (data.followUps || []).filter(function (r) { return live(r) && r.Entity === entity && r.RecordID === id; }); }
+
   // ---------- needs attention ----------
   function needsAttention(data, month, today, settings, campaignId) {
     var st = settings || {}, out = [], inC = function (r) { return live(r) && (!campaignId || r.CampaignID === campaignId); };
@@ -962,8 +977,34 @@ var AGSCore = (function () {
     if (oldIr.length) out.push({ entity: 'irs', id: '', level: 2, kind: 'IR', title: oldIr.length + ' IR' + (oldIr.length === 1 ? '' : 's') + ' pending for more than ' + irDays + ' days', campaignId: '', meta: 'Oldest: ' + oldIr.reduce(function (m, r) { return Math.max(m, daysOpen('irs', r, today)); }, 0) + ' days' });
     var oldGr = (data.grievances || []).filter(function (r) { return inC(r) && isOpen('grievances', r) && daysOpen('grievances', r, today) > grDays; });
     if (oldGr.length) out.push({ entity: 'grievances', id: '', level: 2, kind: 'Grievance', title: oldGr.length + ' grievance' + (oldGr.length === 1 ? '' : 's') + ' open for more than ' + grDays + ' days', campaignId: '', meta: 'Categories: ' + oldGr.map(function (r) { return r.Category; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') });
+    (data.followUps || []).filter(function (r) { return inC(r) && fuOverdue(r, today); }).forEach(function (r) { out.push({ entity: 'followUps', id: r.FollowUpID, level: 3, kind: 'Follow-up', title: 'No answer yet: ' + r.Question.slice(0, 90), campaignId: r.CampaignID, meta: 'Due ' + r.DueDate + ' · about ' + r.Title }); });
     kpiOverview(data, month, campaignId).forEach(function (k) { if (k.delta !== null && k.delta <= -0.25) out.push({ entity: 'kpi', id: k.campaignId, level: 2, kind: 'KPI', title: k.name + ' Total Grade down ' + Math.abs(k.delta).toFixed(2), campaignId: k.campaignId, meta: 'From ' + k.prev.total.toFixed(2) + ' to ' + k.cur.total.toFixed(2) + ' vs last month' }); });
     return out.sort(function (a, c) { return c.level - a.level; });
+  }
+
+  // ---------- the Monday summary email (built here so it can be tested; sent only by the server) ----------
+  function htmlEsc(t) { return s(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function weeklySummary(data, today, settings, appUrl) {
+    var month = '', link = function (page, label) { return appUrl ? '<a href="' + htmlEsc(appUrl.replace(/\/$/, '') + '/#/' + page) + '" style="color:#2B5C9E">' + htmlEsc(label) + '</a>' : htmlEsc(label); };
+    (data.kpiRows || []).forEach(function (r) { if (live(r) && r.Month > month) month = r.Month; }); month = month || today.slice(0, 7);
+    var cname = function (cid) { var c = (data.campaigns || []).filter(function (x) { return x.CampaignID === cid; })[0]; return c ? c.Name : cid; };
+    var since = addDays(today, -7), L = {};
+    LOGS.forEach(function (e) { L[e] = logSummary(data, e, today.slice(0, 7), today); L[e].week = (data[e] || []).filter(function (r) { return live(r) && dateOf(e, r) >= since; }).length; });
+    var needs = needsAttention(data, today.slice(0, 7), today, settings), kp = kpiOverview(data, month).filter(function (k) { return k.cur; });
+    var fu = (data.followUps || []).filter(live), waiting = fu.filter(function (r) { return r.Status === 'Waiting'; }), answered = fu.filter(function (r) { return r.Status === 'Answered'; });
+    var cell = 'padding:6px 10px;border-bottom:1px solid #E3E8EF;font-size:13px', th = cell + ';text-align:left;color:#5E6B80;font-weight:600;background:#F6F8FA';
+    var h = '<div style="font-family:Arial,Helvetica,sans-serif;color:#18212F;max-width:680px">' +
+      '<h2 style="margin:0 0 4px">Operations summary · week of ' + htmlEsc(addDays(today, -6)) + ' to ' + htmlEsc(today) + '</h2>' +
+      '<p style="margin:0 0 16px;color:#5E6B80;font-size:13px">' + link('dashboard', 'Open the Operations Hub') + '</p>' +
+      '<h3 style="margin:16px 0 6px;font-size:15px">Needs attention (' + needs.length + ')</h3>' +
+      (needs.length ? '<ul style="margin:0;padding-left:18px;font-size:13px">' + needs.slice(0, 12).map(function (x) { return '<li style="margin:3px 0"><b>' + htmlEsc(x.kind) + ':</b> ' + htmlEsc(x.title) + (x.campaignId ? ' <span style="color:#5E6B80">(' + htmlEsc(cname(x.campaignId)) + ', accountable: ' + htmlEsc(accountableNames(data, x.campaignId).join(', ') || 'not assigned') + ')</span>' : '') + '</li>'; }).join('') + (needs.length > 12 ? '<li>…and ' + (needs.length - 12) + ' more in the app</li>' : '') + '</ul>' : '<p style="font-size:13px;margin:0">Nothing overdue or critical.</p>') +
+      '<h3 style="margin:16px 0 6px;font-size:15px">Your follow-ups</h3><p style="font-size:13px;margin:0">' + waiting.length + ' waiting for an answer' + (waiting.filter(function (r) { return fuOverdue(r, today); }).length ? ' (' + waiting.filter(function (r) { return fuOverdue(r, today); }).length + ' overdue)' : '') + ' · ' + answered.length + ' answered and ready for you to review · ' + link('followups', 'see follow-ups') + '</p>' +
+      '<h3 style="margin:16px 0 6px;font-size:15px">Logs</h3><table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Log</th><th style="' + th + '">New this week</th><th style="' + th + '">Open now</th><th style="' + th + '">Oldest open</th></tr>' +
+      [['issues', 'Client issues'], ['escalations', 'Client escalations'], ['irs', 'IR log'], ['grievances', 'Agent grievances']].map(function (x) { var l = L[x[0]]; return '<tr><td style="' + cell + '">' + link(x[0], x[1]) + '</td><td style="' + cell + '">' + l.week + '</td><td style="' + cell + '">' + l.open + (x[0] === 'issues' && l.overdue ? ' (' + l.overdue + ' overdue)' : '') + (x[0] === 'escalations' && l.critical ? ' (' + l.critical + ' critical)' : '') + '</td><td style="' + cell + '">' + (l.oldest === null ? '—' : l.oldest + ' days') + '</td></tr>'; }).join('') + '</table>' +
+      '<h3 style="margin:16px 0 6px;font-size:15px">KPIs · ' + htmlEsc(month) + '</h3>' + (kp.length ? '<table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Campaign</th><th style="' + th + '">Total Grade</th><th style="' + th + '">vs previous month</th></tr>' +
+        kp.map(function (k) { return '<tr><td style="' + cell + '">' + htmlEsc(k.name) + '</td><td style="' + cell + '"><b>' + k.cur.total.toFixed(2) + '</b></td><td style="' + cell + ';color:' + (k.delta === null ? '#5E6B80' : k.delta < 0 ? '#B42318' : '#166534') + '">' + (k.delta === null ? '—' : (k.delta > 0 ? '+' : '') + k.delta.toFixed(2)) + '</td></tr>'; }).join('') + '</table>' : '<p style="font-size:13px;margin:0">No KPI results yet.</p>') +
+      '<p style="margin:18px 0 0;font-size:12px;color:#5E6B80">Sent automatically every Monday by the AGS Operations Hub. Figures as of ' + htmlEsc(today) + '.</p></div>';
+    return { subject: 'Operations summary · ' + today + ' · ' + needs.length + ' item' + (needs.length === 1 ? '' : 's') + ' need attention', html: h };
   }
 
   // ------------------------------------------------------------------ CSV (escaped; formula-injection safe)
@@ -1032,6 +1073,7 @@ var AGSCore = (function () {
       repo.update(entity, id, next); ctx.mark(entity, next); ctx.audit(action || 'UPDATE', entity, id, fields, det);
       return next;
     };
+    ctx.notify = [];   // emails to send after the change is saved (server only)
     ctx.result = function () { var out = {}; Object.keys(ctx.changed).forEach(function (e) { out[e] = Object.keys(ctx.changed[e]).map(function (k) { return ctx.changed[e][k]; }); }); return { primary: ctx.primary, changed: out }; };
     return ctx;
   }
@@ -1117,6 +1159,61 @@ var AGSCore = (function () {
     ctx.primary = { entity: entity, id: p.id };
   } };
 
+  // ---------- follow-ups: the Executive (or an Admin) asks; the people asked answer; the asker closes or reopens ----------
+  var FU_TARGETS = { issues: 'IssueID', escalations: 'EscalationID', irs: 'IRID', grievances: 'GrievanceID', campaign: 'CampaignID' };
+  function userEmail(ctx, uid) { var u = ctx.find('users', uid); return u && !u.ArchivedAt && b(u.Active) ? s(u.Email) : ''; }
+  function fuMail(ctx, toIds, subject, lines, settings) {
+    var url = s(ctx.settings.AppUrl).replace(/\/$/, ''), emails = toIds.map(function (u) { return userEmail(ctx, u); }).filter(Boolean);
+    if (!emails.length) return;
+    ctx.notify.push({ to: emails.join(','), subject: subject, html: '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#18212F">' + lines.map(function (l) { return '<p style="margin:0 0 10px">' + htmlEsc(l) + '</p>'; }).join('') + (url ? '<p><a href="' + htmlEsc(url + '/#/followups') + '">Open follow-ups in the Operations Hub</a></p>' : '') + '<p style="color:#5E6B80;font-size:12px">AGS Operations Hub</p></div>' });
+  }
+  function fuThread(r) { return arr(r.Thread); }
+  H.askFollowUp = { write: true, fn: function (ctx, p) {
+    if (!(isExec(ctx.user) || isAdmin(ctx.user))) forbid('Only the Executive and Admins can ask for follow-ups.');
+    var entity = s(p.entity), errors = {}; if (!FU_TARGETS[entity]) throw AgsError('VALIDATION', 'Choose what the follow-up is about.');
+    var rec = ctx.get(entity === 'campaign' ? 'campaigns' : entity, p.recordId), cid = entity === 'campaign' ? rec.CampaignID : rec.CampaignID;
+    var q = s(p.question).replace(CTRL_RE, '').trim().slice(0, 2000), due = s(p.dueDate);
+    if (q.length < 3) errors.question = 'Write the question or request.';
+    if (!isIsoDate(due)) errors.dueDate = 'Choose a due date.'; else if (due < ctx.today) errors.dueDate = 'The due date is in the past.';
+    var camp = ctx.find('campaigns', cid), to = (Array.isArray(p.toIds) ? p.toIds : splitIds(p.toIds)).map(s).filter(Boolean);
+    if (!to.length) to = splitIds(camp.AccountManagerIDs).concat(entity === 'irs' || entity === 'grievances' ? splitIds(camp.HRIDs) : []);
+    var allowed = splitIds(camp.AccountManagerIDs).concat(splitIds(camp.HRIDs));
+    to = to.filter(function (u, i) { return to.indexOf(u) === i; });
+    if (!to.length) errors.toIds = 'This campaign has no account manager or HR yet. Assign them in Settings → Campaigns.';
+    else if (to.some(function (u) { return allowed.indexOf(u) < 0; })) errors.toIds = 'Ask the campaign\'s account managers or HR.';
+    if (entity === 'grievances' && to.some(function (u) { var x = ctx.find('users', u); return !x || [ROLES.AM, ROLES.HR, ROLES.ADMIN].indexOf(normRole(x.Role)) < 0; })) errors.toIds = 'Grievances are confidential.';
+    failIf(errors);
+    var title = entity === 'campaign' ? camp.Name : (rec.Title || ((ctx.find('agents', rec.AgentID) || {}).FullName || '') + ' · ' + (rec.Type || rec.Category || ''));
+    var fu = ctx.insert('followUps', { Entity: entity, RecordID: p.recordId, CampaignID: cid, Title: s(title).slice(0, 200), Question: q, ToIDs: to.join(','), DueDate: due, Status: 'Waiting',
+      Thread: JSON.stringify([{ at: ctx.now, by: ctx.user.displayName, kind: 'question', text: q }]) }, 'FOLLOWUP_ASKED');
+    fuMail(ctx, to, 'Follow-up requested: ' + s(title).slice(0, 80), [ctx.user.displayName + ' asked for a follow-up by ' + due + ' on ' + camp.Name + ': ' + title + '.', '"' + q + '"', 'Reply in the Operations Hub under Follow-ups.']);
+    ctx.primary = { entity: 'followUps', id: fu.FollowUpID };
+  } };
+  H.answerFollowUp = { write: true, fn: function (ctx, p) {
+    var cur = ctx.get('followUps', p.id); checkVersion('followUps', cur, p.expectedVersion);
+    if (!(isAdmin(ctx.user) || splitIds(cur.ToIDs).indexOf(ctx.user.userId) >= 0)) forbid('Only the people asked can answer this follow-up.');
+    if (cur.Status === 'Closed') throw AgsError('VALIDATION', 'This follow-up is closed.');
+    var text = s(p.text).replace(CTRL_RE, '').trim().slice(0, 4000); if (text.length < 2) throw AgsError('VALIDATION', 'Some fields need attention.', { fields: { text: 'Write your answer.' } });
+    var th = fuThread(cur); th.push({ at: ctx.now, by: ctx.user.displayName, kind: 'answer', text: text });
+    ctx.update('followUps', cur.FollowUpID, { Thread: JSON.stringify(th.slice(-100)), Status: 'Answered' }, p.expectedVersion, 'FOLLOWUP_ANSWERED');
+    var asker = ctx.list('users', function (u) { return s(u.Email).toLowerCase() === s(cur.CreatedBy).toLowerCase(); })[0];
+    if (asker) fuMail(ctx, [asker.UserID], 'Follow-up answered: ' + s(cur.Title).slice(0, 80), [ctx.user.displayName + ' answered your follow-up on ' + cur.Title + ':', '"' + text + '"']);
+    ctx.primary = { entity: 'followUps', id: cur.FollowUpID };
+  } };
+  H.closeFollowUp = { write: true, fn: function (ctx, p) {
+    var cur = ctx.get('followUps', p.id); checkVersion('followUps', cur, p.expectedVersion);
+    if (!(isAdmin(ctx.user) || s(cur.CreatedBy).toLowerCase() === ctx.user.email)) forbid('Only the person who asked can close or reopen this follow-up.');
+    var reopen = !!p.reopen, note = s(p.note).replace(CTRL_RE, '').trim().slice(0, 2000), th = fuThread(cur), errors = {};
+    if (reopen && note.length < 3) errors.note = 'Say what you still need.';
+    if (reopen && p.dueDate && (!isIsoDate(s(p.dueDate)) || s(p.dueDate) < ctx.today)) errors.dueDate = 'Choose a due date from today.';
+    failIf(errors);
+    if (note) th.push({ at: ctx.now, by: ctx.user.displayName, kind: reopen ? 'question' : 'note', text: note });
+    var f = { Thread: JSON.stringify(th.slice(-100)), Status: reopen ? 'Waiting' : 'Closed', ClosedAt: reopen ? '' : ctx.now }; if (reopen && p.dueDate) f.DueDate = s(p.dueDate);
+    ctx.update('followUps', cur.FollowUpID, f, p.expectedVersion, reopen ? 'FOLLOWUP_REOPENED' : 'FOLLOWUP_CLOSED');
+    if (reopen) fuMail(ctx, splitIds(cur.ToIDs), 'Follow-up reopened: ' + s(cur.Title).slice(0, 80), [ctx.user.displayName + ' needs more on ' + cur.Title + ' by ' + (f.DueDate || cur.DueDate) + ':', '"' + note + '"']);
+    ctx.primary = { entity: 'followUps', id: cur.FollowUpID };
+  } };
+
   // ---------- KPIs ----------
   // Saves one month of RAW numbers for a campaign (one row per agent). The server grades every row with the score
   // guide in force for that month, shift and profile. Rows imported from the old sheets keep their recorded grades.
@@ -1173,7 +1270,7 @@ var AGSCore = (function () {
   } };
 
   // ---------- archive / restore ----------
-  var ARCHIVABLE = ['issues', 'escalations', 'irs', 'grievances', 'agents', 'campaigns', 'kpiGuides', 'kpiRows'];
+  var ARCHIVABLE = ['issues', 'escalations', 'irs', 'grievances', 'agents', 'campaigns', 'kpiGuides', 'kpiRows', 'followUps'];
   H.archiveRecord = { write: true, admin: true, fn: function (ctx, p) {
     if (ARCHIVABLE.indexOf(p.entity) < 0) throw AgsError('VALIDATION', 'This record type cannot be archived.');
     var reason = s(p.reason).replace(CTRL_RE, '').trim().slice(0, 300);
@@ -1239,7 +1336,10 @@ var AGSCore = (function () {
     Environment: function (v) { return v === 'PROTOTYPE' || v === 'PRODUCTION' ? '' : 'Use PROTOTYPE or PRODUCTION.'; },
     IRPendingDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
     GrievanceDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
-    EscalationStaleDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; }
+    EscalationStaleDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
+    FollowUpDays: function (v) { return /^\d{1,2}$/.test(v) ? '' : 'Enter a whole number of days.'; },
+    AppUrl: function (v) { return !v || /^https:\/\/[^\s"<>]+$/.test(v) ? '' : 'Enter the full address, starting with https://'; },
+    WeeklySummaryTo: function (v) { return !v || v.split(',').every(function (x) { return isEmail(x.trim()); }) ? '' : 'Enter email addresses separated by commas.'; }
   };
   H.saveSettings = { write: true, admin: true, fn: function (ctx, p) {
     var ch = p.changes || {}, errors = {}, cur = ctx.settings, clean = {};
@@ -1280,6 +1380,7 @@ var AGSCore = (function () {
       if (prior) { if (prior.actor !== user.email || prior.action !== action) throw AgsError('VALIDATION', 'This request ID was already used for a different operation.'); var r = clone(prior.result || {}); r.duplicate = true; return r; }
       var ctx = makeCtx(repo, user, requestId), result = h.fn(ctx, payload) || ctx.result();
       repo.saveRequest(requestId, { actor: user.email, action: action, result: result, primary: result.primary || ctx.primary });
+      if (ctx.notify.length) { result = clone(result); result.notify = ctx.notify; }   // never stored, so a retried request sends nothing twice
       return result;
     });
   }
@@ -1357,7 +1458,7 @@ var AGSCore = (function () {
       var ts = (date || today) + 'T02:00:00.000Z'; r.IsSynthetic = 'TRUE'; r.CreatedAt = ts; r.CreatedBy = 'synthetic.seed@example.com'; r.UpdatedAt = ts; r.UpdatedBy = r.CreatedBy; r.RecordVersion = '1';
       return r;
     }
-    var D = { campaigns: [], agents: [], issues: [], escalations: [], irs: [], grievances: [], kpiGuides: [], kpiRows: [], users: [] };
+    var D = { campaigns: [], agents: [], issues: [], escalations: [], irs: [], grievances: [], kpiGuides: [], kpiRows: [], followUps: [], users: [] };
     var U = function (email, nm, role, extra) { var u = rec('users', Object.assign({ Email: email, DisplayName: nm, Role: role, Active: 'TRUE', CampaignIDs: '' }, extra || {}), year + '-01-02'); D.users.push(u); return u; };
     var admin = U('celeste.navarro@example.com', 'Celeste Navarro', 'ADMIN');
     U('dominic.reyes@example.com', 'Dominic Reyes', 'EXECUTIVE');
@@ -1425,12 +1526,20 @@ var AGSCore = (function () {
       var c5 = pick(cs), ag5 = pick(agentsIn(c5.CampaignID)), d5 = addDays(start, Math.floor(span * (0.2 + 0.8 * rnd()))), st5 = diffDays(today, d5) > 30 ? pick(['Resolved', 'Closed']) : pick(['Received', 'Under review', 'Resolved']);
       D.grievances.push(rec('grievances', { CampaignID: c5.CampaignID, AgentID: ag5.AgentID, ReceivedDate: d5, Category: pick(LISTS.GrievanceCategory), Details: 'Synthetic grievance for testing.', HandledBy: pick(['HR partner', 'Account manager']), Status: st5, Resolution: st5 === 'Resolved' || st5 === 'Closed' ? 'Discussed with the agent and agreed next steps.' : '', ResolvedDate: st5 === 'Resolved' || st5 === 'Closed' ? addDays(d5, between(3, 15)) : '', Updates: updates(d5, 'Received from the agent.') }, d5));
     }
+    // a few follow-ups from the Executive, to show how they look
+    var exec = D.users.filter(function (u) { return u.Role === 'EXECUTIVE'; })[0], openIssues = D.issues.filter(function (r) { return ['Open', 'In progress'].indexOf(r.Status) >= 0; });
+    [[openIssues[0], 'Waiting', 'What is blocking this, and when will it be resolved?', ''], [openIssues[1], 'Answered', 'Is the client aware of the timeline?', 'Yes. We sent the plan on Friday and they agreed to the new date.'], [D.escalations[0], 'Waiting', 'Please brief me on the root cause before the client call.', '']].forEach(function (x, i) {
+      if (!x[0]) return; var c = D.campaigns.filter(function (cc) { return cc.CampaignID === x[0].CampaignID; })[0], ent = x[0].IssueID ? 'issues' : 'escalations', d0 = addDays(today, -4 + i);
+      var th = [{ at: d0 + 'T01:00:00.000Z', by: exec.DisplayName, kind: 'question', text: x[2] }]; if (x[3]) th.push({ at: addDays(d0, 1) + 'T05:00:00.000Z', by: 'Synthetic seed', kind: 'answer', text: x[3] });
+      var r = rec('followUps', { Entity: ent, RecordID: x[0].IssueID || x[0].EscalationID, CampaignID: x[0].CampaignID, Title: x[0].Title, Question: x[2], ToIDs: c.AccountManagerIDs, DueDate: addDays(d0, i === 0 ? 2 : 3), Status: x[1], Thread: JSON.stringify(th) }, d0);
+      r.CreatedBy = exec.Email; D.followUps.push(r);
+    });
     return D;
   }
 
   return {
     CORE_VERSION: CORE_VERSION, APP_NAME: APP_NAME, ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, ASSIGNABLE_ROLES: ASSIGNABLE_ROLES, CAMPAIGN_ROLES: CAMPAIGN_ROLES,
-    LISTS: LISTS, CLOSED: CLOSED, SCHEMA: SCHEMA, META: META, ENTITIES: ENTITIES, DATA_ENTITIES: DATA_ENTITIES, LOGS: LOGS, DEFAULT_SETTINGS: DEFAULT_SETTINGS, FIELDS: FIELDS,
+    LISTS: LISTS, CLOSED: CLOSED, FOLLOWUP_STATUS: FOLLOWUP_STATUS, fuOverdue: fuOverdue, followUpsFor: followUpsFor, weeklySummary: weeklySummary, htmlEsc: htmlEsc, SCHEMA: SCHEMA, META: META, ENTITIES: ENTITIES, DATA_ENTITIES: DATA_ENTITIES, LOGS: LOGS, DEFAULT_SETTINGS: DEFAULT_SETTINGS, FIELDS: FIELDS,
     CAMPAIGN_NAMES: CAMPAIGN_NAMES, startingGuides: startingGuides,
     AgsError: AgsError, s: s, n: n, b: b, isIsoDate: isIsoDate, addDays: addDays, diffDays: diffDays, json: json, arr: arr, rate: rate, fmtRate: fmtRate, round: round, clone: clone,
     isEmail: isEmail, live: live, blank: blank, byKey: byKey, splitIds: splitIds, settingsWithDefaults: settingsWithDefaults, normRole: normRole, periodOf: periodOf, daysInMonth: daysInMonth,
@@ -2051,8 +2160,8 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   CHG.gMonth = function (el) { S.g.month = el.value; render(); };
   // ================= shell =================
   var NAV = [['dashboard', 'Overview', 'dashboard'], ['kpis', 'KPIs', 'analytics'], ['issues', 'Client issues', 'followups'], ['escalations', 'Client escalations', 'sessions'],
-    ['irs', 'IR log', 'reports'], ['attrition', 'Attrition', 'agents'], ['grievances', 'Agent grievances', 'templates', 'grievances'], ['settings', 'Settings', 'settings', 'viewSettings']];
-  var TITLES = { dashboard: 'Overview', kpis: 'KPIs', issues: 'Client issues', escalations: 'Client escalations', irs: 'IR log', attrition: 'Attrition', grievances: 'Agent grievances', settings: 'Settings' };
+    ['irs', 'IR log', 'reports'], ['attrition', 'Attrition', 'agents'], ['grievances', 'Agent grievances', 'templates', 'grievances'], ['followups', 'Follow-ups', 'bell'], ['settings', 'Settings', 'settings', 'viewSettings']];
+  var TITLES = { dashboard: 'Overview', kpis: 'KPIs', issues: 'Client issues', escalations: 'Client escalations', irs: 'IR log', attrition: 'Attrition', grievances: 'Agent grievances', followups: 'Follow-ups', settings: 'Settings' };
   var MONTH_PAGES = { dashboard: 1, kpis: 1, attrition: 1, issues: 1, escalations: 1, irs: 1, grievances: 1 };
   function navList() { return NAV.filter(function (n) { return !n[3] || cap(n[3]); }); }
   function monthOptions() {
@@ -2081,7 +2190,8 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     S.today = todayTz();
     var allowed = navList().map(function (x) { return x[0]; }), page = PAGES[S.page] && allowed.indexOf(S.page) >= 0 ? S.page : 'dashboard';
     var act = document.activeElement, keepId = act && act.id && $('#page').contains(act) ? act.id : null, selStart = keepId && act.selectionStart;
-    $('#nav').innerHTML = navList().map(function (n) { return '<li><button data-act="nav" data-page="' + n[0] + '"' + (n[0] === page ? ' aria-current="page"' : '') + ' title="' + n[1] + '">' + icon(n[2]) + '<span class="nav-label">' + n[1] + '</span></button></li>'; }).join('');
+    var fuMine = myOpenFollowUps().length;
+    $('#nav').innerHTML = navList().map(function (n) { return '<li><button data-act="nav" data-page="' + n[0] + '"' + (n[0] === page ? ' aria-current="page"' : '') + ' title="' + n[1] + '">' + icon(n[2]) + '<span class="nav-label">' + n[1] + (n[0] === 'followups' && fuMine ? ' <span class="nav-count">' + fuMine + '</span>' : '') + '</span></button></li>'; }).join('');
     $('#g-month').style.visibility = MONTH_PAGES[page] ? 'visible' : 'hidden';
     $('#g-camp').style.visibility = page === 'settings' ? 'hidden' : 'visible';
     $('#page-title').textContent = TITLES[page];
@@ -2118,7 +2228,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   function gradeCls(g) { return g === null || g === undefined ? '' : (+g < 1.5 ? 'g-bad' : +g < 2.5 ? 'g-warn' : ''); }
   function totalCls(t) { return t === null || t === undefined ? '' : (+t < 2 ? 'g-bad' : +t < 2.5 ? 'g-warn' : ''); }
   function pill(text, kind) { return '<span class="pill' + (kind ? ' pill-' + kind : '') + '">' + esc(text) + '</span>'; }
-  var STATUS_KIND = { Open: 'info', 'In progress': '', 'Pending client': 'warn', Resolved: 'ok', Pending: 'warn', Issued: '', Waived: 'ok', Received: 'info', 'Under review': '', Closed: 'ok' };
+  var STATUS_KIND = { Waiting: 'warn', Answered: 'info', Overdue: 'bad', Open: 'info', 'In progress': '', 'Pending client': 'warn', Resolved: 'ok', Pending: 'warn', Issued: '', Waived: 'ok', Received: 'info', 'Under review': '', Closed: 'ok' };
   var SEV_KIND = { Low: '', Medium: '', High: 'warn', Critical: 'bad' };
   function statusPill(st) { return pill(st, STATUS_KIND[st]); }
   function deltaTxt(d) { return d === null || d === undefined ? '<span class="muted">—</span>' : d === 0 ? '<span class="muted">no change</span>' : '<span class="' + (d > 0 ? 'g-ok' : 'g-bad') + '">' + (d > 0 ? '▲ +' : '▼ ') + d.toFixed(2) + '</span>'; }
@@ -2138,7 +2248,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       tile('Open client escalations', L.escalations.open, L.escalations.critical ? '<span class="g-bad">' + L.escalations.critical + ' critical</span>' : 'None critical', '', 'escalations') +
       tile('IR log · ' + monthLabel(month).split(' ')[0], L.irs.monthTotal, L.irs.pending + ' pending · ' + L.irs.issued + ' issued · ' + L.irs.waived + ' waived', L.irs.pending ? 'g-warn' : '', 'irs') +
       tile('Attrition · ' + monthLabel(month).split(' ')[0], at.current.rate === null ? '—' : at.current.rate.toFixed(1) + '%', at.current.separations + ' separation' + (at.current.separations === 1 ? '' : 's') + ' · YTD ' + (at.ytdRate === null ? '—' : at.ytdRate.toFixed(1) + '%'), '', 'attrition') +
-      (cap('grievances') ? tile('Agent grievances', L.grievances.open + ' open', L.grievances.oldest !== null ? 'oldest ' + L.grievances.oldest + ' days' : 'None open', '', 'grievances') : '') + '</div>';
+      (cap('grievances') ? tile('Agent grievances', L.grievances.open + ' open', L.grievances.oldest !== null ? 'oldest ' + L.grievances.oldest + ' days' : 'None open', '', 'grievances') : '') + fuTile() + '</div>';
     var kpiTable = '<section class="panel"><div class="panel-h"><h2>KPIs by campaign</h2><span class="sub">Average Total Grade out of 5, from each campaign\'s score guide · ' + esc(monthLabel(month)) + '</span></div><div class="table-wrap"><table class="t"><thead><tr><th>Campaign</th><th>Accountable</th><th class="num">Agents</th><th class="num">Total Grade</th><th class="num">vs last month</th><th class="num">Attendance</th><th class="num">QA</th><th>Agents graded 1 · 2 · 3 · 4 · 5</th></tr></thead><tbody>' +
       kp.map(function (k) {
         var head = '<td class="t-title"><a href="#/kpis" data-act="kpiCamp" data-id="' + esc(k.campaignId) + '">' + esc(k.name) + '</a></td><td class="muted">' + esc(accountable(k.campaignId)) + '</td>';
@@ -2170,7 +2280,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   };
   ACT.kpiCamp = function (el, ev) { if (ev) ev.preventDefault(); pf('kpis', {}).campaignId = el.dataset.id; go('kpis'); };
   ACT.goGuides = function (el, ev) { if (ev) ev.preventDefault(); pf('settings', { tab: 'guides' }).tab = 'guides'; go('settings'); };
-  ACT.openAttn = function (el) { var e = el.dataset.entity; if (e === 'kpi') { pf('kpis', {}).campaignId = el.dataset.id; go('kpis'); return; } if (el.dataset.id) { go(e); setTimeout(function () { openRecord(e, el.dataset.id); }, 30); } else go(e); };
+  ACT.openAttn = function (el) { var e = el.dataset.entity; if (e === 'followUps') { go('followups'); setTimeout(function () { openFollowUp(el.dataset.id); }, 30); return; } if (e === 'kpi') { pf('kpis', {}).campaignId = el.dataset.id; go('kpis'); return; } if (el.dataset.id) { go(e); setTimeout(function () { openRecord(e, el.dataset.id); }, 30); } else go(e); };
 
   // ================= KPIs =================
   function guideDef(g) { return C.json(g && g.Definition, { raw: [], kpis: [], groups: {} }); }
@@ -2195,7 +2305,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var head = '<div class="page-head"><div><p>' + esc(camp ? camp.Name : 'No campaign') + ' · ' + esc(monthLabel(month)) + ' · accountable: ' + esc(accountable(cid)) + '. Grades and the Total Grade are calculated from the RAW numbers with the score guide in force for the month.</p></div><div class="actions">' +
       (S.g.campaignId ? '' : '<label class="sr-only" for="kpi-camp">Campaign</label><select id="kpi-camp" class="input input-sm" data-change="kpiCampSel">' + campOpts(cid) + '</select>') +
       '<label class="check" style="margin:0 6px"><input type="checkbox" data-change="kpiRaw"' + (f.showRaw ? ' checked' : '') + '> Show RAW columns</label>' +
-      (rows.length ? '<button class="btn" data-act="exportKpis">Export CSV</button>' : '') + (cap('writeKpis') && guides.length ? '<button class="btn btn-primary" data-act="enterRaw">Enter RAW numbers</button>' : '') + '</div></div>';
+      (canAsk() && cid ? '<button class="btn" data-act="askFu" data-entity="campaign" data-id="' + esc(cid) + '">Ask about this campaign</button>' : '') + (rows.length ? '<button class="btn" data-act="exportKpis">Export CSV</button>' : '') + (cap('writeKpis') && guides.length ? '<button class="btn btn-primary" data-act="enterRaw">Enter RAW numbers</button>' : '') + '</div></div>';
     if (!guides.length) return head + '<section class="panel">' + emptyState('No score guide for ' + esc(camp ? camp.Name : 'this campaign') + ' in ' + esc(monthLabel(month)), cap('manageGuides') ? 'Add one in Settings → Score guides, then enter the RAW numbers.' : 'An Admin adds score guides in Settings.') + '</section>';
     var tables = guides.map(function (g) {
       var def = guideDef(g), gr = rows.filter(function (r) { return r.GuideID === g.GuideID || (!guides.some(function (x) { return x.GuideID === r.GuideID; }) && r.Shift === g.Shift && r.Profile === g.Profile); });
@@ -2370,6 +2480,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         (canW ? '<div class="fgrid" style="margin-top:14px"><div><label class="lbl" for="rv-st">Status</label><select id="rv-st" class="input">' + opts(cfg.statuses, r.Status) + '</select><div class="err" id="rv-e-Status" hidden></div></div>' +
           (entity === 'irs' ? '<div><label class="lbl" for="rv-wr">Reason for waiving</label><input id="rv-wr" class="input" value="' + esc(r.WaiveReason) + '"><div class="err" id="rv-e-WaiveReason" hidden></div></div>' : (entity === 'escalations' || entity === 'grievances') ? '<div class="span2"><label class="lbl" for="rv-res">Resolution</label><textarea id="rv-res" class="input" rows="2">' + esc(r.Resolution) + '</textarea><div class="err" id="rv-e-Resolution" hidden></div></div>' : '<div></div>') +
           '<div class="span2"><label class="lbl" for="rv-note">Add an update</label><textarea id="rv-note" class="input" rows="2" placeholder="What happened, what\'s next"></textarea></div></div>' : '') +
+        fuSection(entity, r[cfg.id], r.CampaignID) +
         '<h3 style="font-size:14px;margin:16px 0 6px">Updates</h3>' + (ups.length ? '<ul class="updates">' + ups.map(function (u) { return '<li><span class="t-sub">' + esc(fmtTs(u.at)) + ' · ' + esc(u.by) + '</span><div>' + esc(u.text) + '</div></li>'; }).join('') + '</ul>' : '<p class="muted">No updates yet.</p>'),
       foot: (canW ? '<button class="btn left" id="rv-edit">Edit details</button>' : '') + (cap('archive') ? '<button class="btn btn-danger-ghost" id="rv-arch">Delete</button>' : '') + '<button class="btn" data-act="closeModal">Close</button>' + (canW ? '<button class="btn btn-primary" id="rv-save">Save</button>' : '') });
     if (canW) {
@@ -2445,6 +2556,77 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         .then(function () { closeModal(true); render(); toast('Separation recorded.', 'ok'); }, function (e) { busy(btn, false); if (!showFieldErrors(m, e, 'sp-e-')) writeError(e); });
     };
   };
+
+  // ================= follow-ups =================
+  function canAsk() { return C.isExec(S.user) || C.isAdmin(S.user); }
+  function isMineToAnswer(r) { return C.splitIds(r.ToIDs).indexOf(S.user.userId) >= 0; }
+  function askedByMe(r) { return String(r.CreatedBy).toLowerCase() === S.user.email; }
+  function myOpenFollowUps() { return (S.data.followUps || []).filter(function (r) { return C.live(r) && ((r.Status === 'Waiting' && isMineToAnswer(r)) || (r.Status === 'Answered' && askedByMe(r))); }); }
+  function userName(id) { var u = (S.data.users || []).filter(function (x) { return x.UserID === id; })[0]; return u ? u.DisplayName : id; }
+  function fuTile() {
+    var all = (S.data.followUps || []).filter(C.live), mine = myOpenFollowUps();
+    if (canAsk()) { var w = all.filter(function (r) { return r.Status === 'Waiting'; }), od = w.filter(function (r) { return C.fuOverdue(r, S.today); }).length, an = all.filter(function (r) { return r.Status === 'Answered'; }).length;
+      return '<button class="kpi" data-act="nav" data-page="followups"><span class="k-label">Follow-ups</span><span class="k-value">' + w.length + ' waiting</span><span class="k-sub">' + (od ? '<span class="g-bad">' + od + ' overdue</span> · ' : '') + an + ' answered to review</span></button>'; }
+    return '<button class="kpi" data-act="nav" data-page="followups"><span class="k-label">Follow-ups for you</span><span class="k-value">' + mine.length + '</span><span class="k-sub">' + (mine.length ? 'Waiting for your answer' : 'Nothing waiting') + '</span></button>';
+  }
+  function fuSection(entity, id, cid) {
+    var list = C.followUpsFor(S.data, entity, id);
+    return '<div class="fu-box"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="font-size:14px;margin:0">Follow-ups' + (list.length ? ' (' + list.length + ')' : '') + '</h3>' +
+      (canAsk() ? '<button class="btn btn-sm" data-act="askFu" data-entity="' + entity + '" data-id="' + esc(id) + '">Ask for a follow-up</button>' : '') + '</div>' +
+      (list.length ? '<ul class="updates" style="margin-top:8px">' + list.map(function (r) { return '<li><button class="linkish" data-act="openFu" data-id="' + esc(r.FollowUpID) + '">' + esc(r.Question) + '</button> ' + statusPill(r.Status === 'Waiting' && C.fuOverdue(r, S.today) ? 'Overdue' : r.Status) + '<div class="t-sub">Asked of ' + esc(C.splitIds(r.ToIDs).map(userName).join(', ')) + ' · due ' + esc(fmtDate(r.DueDate)) + '</div></li>'; }).join('') + '</ul>' : '') + '</div>';
+  }
+  ACT.askFu = function (el) { askFollowUp(el.dataset.entity, el.dataset.id); };
+  function askFollowUp(entity, id) {
+    var rec = entity === 'campaign' ? S.idx.camps[id] : recById(entity, id), cid = rec.CampaignID, camp = S.idx.camps[cid];
+    var people = C.splitIds(camp.AccountManagerIDs).map(function (u) { return [u, userName(u) + ' (account manager)', true]; }).concat(C.splitIds(camp.HRIDs).map(function (u) { return [u, userName(u) + ' (HR)', entity === 'irs' || entity === 'grievances']; }));
+    var days = parseInt(S.settings.FollowUpDays, 10) || 3;
+    var m = openModal({ title: 'Ask for a follow-up', sub: esc((entity === 'campaign' ? 'Campaign: ' : '') + (rec.Title || rec.Name || agName(rec.AgentID)) + ' · ' + camp.Name),
+      body: people.length ? '<div class="fgrid"><div class="span2"><label class="lbl req" for="fu-q">Your question or request</label><textarea id="fu-q" class="input" rows="3" placeholder="e.g. What is blocking this, and when will it be resolved?"></textarea><div class="err" id="fu-e-question" hidden></div></div>' +
+        '<div><span class="lbl">Ask</span>' + people.map(function (x) { return '<label class="check"><input type="checkbox" class="fu-to" value="' + esc(x[0]) + '"' + (x[2] ? ' checked' : '') + '> ' + esc(x[1]) + '</label>'; }).join('') + '<div class="err" id="fu-e-toIds" hidden></div></div>' +
+        '<div><label class="lbl req" for="fu-d">Answer by</label><input id="fu-d" class="input" type="date" value="' + esc(C.addDays(S.today, days)) + '"><div class="err" id="fu-e-dueDate" hidden></div></div></div><p class="small muted" style="margin-top:10px">They get an email, and the request shows on their Follow-ups page until they answer.</p>'
+        : '<div class="note warn">' + esc(camp.Name) + ' has no account manager or HR assigned yet. An Admin assigns them in Settings → Campaigns.</div>',
+      foot: '<button class="btn" data-act="closeModal">Cancel</button>' + (people.length ? '<button class="btn btn-primary" id="fu-ok">Send request</button>' : '') });
+    if (!people.length) return;
+    $('#fu-ok', m).onclick = function () {
+      var btn = this; busy(btn, true);
+      Api.write('askFollowUp', { entity: entity, recordId: id, question: $('#fu-q', m).value, dueDate: $('#fu-d', m).value, toIds: $$('.fu-to', m).filter(function (c2) { return c2.checked; }).map(function (c2) { return c2.value; }) }, 'Follow-up').then(function () { closeModal(true); render(); toast('Follow-up sent.', 'ok'); },
+        function (e) { busy(btn, false); if (!showFieldErrors(m, e, 'fu-e-')) writeError(e); });
+    };
+  }
+  ACT.openFu = function (el) { closeAllModals(); openFollowUp(el.dataset.id); };
+  function openFollowUp(id) {
+    var r = (S.data.followUps || []).filter(function (x) { return x.FollowUpID === id; })[0]; if (!r) { toast('That follow-up is not available.', 'warn'); return; }
+    var th = C.arr(r.Thread), canAnswer = r.Status !== 'Closed' && (isMineToAnswer(r) || C.isAdmin(S.user)), canClose = askedByMe(r) || C.isAdmin(S.user);
+    var about = r.Entity === 'campaign' ? 'Campaign ' + campName(r.CampaignID) : (LOGCFG[r.Entity] ? r.Title + ' · ' + campName(r.CampaignID) : r.Title);
+    var m = openModal({ title: 'Follow-up', sub: esc(r.FollowUpID + ' · ' + about), size: 'lg',
+      body: '<div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">' + statusPill(r.Status) + (C.fuOverdue(r, S.today) ? pill('Overdue since ' + fmtDate(r.DueDate), 'bad') : '') + '<span class="small muted">Asked of ' + esc(C.splitIds(r.ToIDs).map(userName).join(', ')) + ' · due ' + esc(fmtDate(r.DueDate)) + '</span></div>' +
+        '<ul class="thread">' + th.map(function (x) { return '<li class="' + esc(x.kind) + '"><div class="t-sub">' + esc(x.by) + ' · ' + esc(fmtTs(x.at)) + (x.kind === 'answer' ? ' · answer' : '') + '</div><div>' + esc(x.text) + '</div></li>'; }).join('') + '</ul>' +
+        (LOGCFG[r.Entity] ? '<p class="small"><button class="linkish" data-act="fuGoRec" data-entity="' + esc(r.Entity) + '" data-id="' + esc(r.RecordID) + '">Open the ' + esc(LOGCFG[r.Entity].noun) + '</button></p>' : '') +
+        (canAnswer ? '<label class="lbl" for="fu-a">Your answer</label><textarea id="fu-a" class="input" rows="3"></textarea><div class="err" id="fu-e-text" hidden></div>' : '') +
+        (canClose && r.Status !== 'Closed' ? '<details style="margin-top:10px"' + (canAnswer ? '' : ' open') + '><summary style="cursor:pointer;font-weight:600">Not enough? Ask again</summary><div class="fgrid" style="margin-top:8px"><div class="span2"><label class="lbl" for="fu-n">What do you still need?</label><textarea id="fu-n" class="input" rows="2"></textarea><div class="err" id="fu-e-note" hidden></div></div><div><label class="lbl" for="fu-nd">New due date</label><input id="fu-nd" class="input" type="date" value="' + esc(C.addDays(S.today, parseInt(S.settings.FollowUpDays, 10) || 3)) + '"><div class="err" id="fu-e-dueDate" hidden></div></div></div></details>' : ''),
+      foot: (canClose ? (r.Status === 'Closed' ? '<button class="btn left" id="fu-reopen">Reopen</button>' : '<button class="btn left' + (r.Status === 'Answered' ? ' btn-primary' : '') + '" id="fu-close">Close as done</button>') : '') + '<button class="btn" data-act="closeModal">Close window</button>' +
+        (canAnswer ? '<button class="btn btn-primary" id="fu-send">Send answer</button>' : '') + (canClose && r.Status !== 'Closed' ? '<button class="btn" id="fu-again">Ask again</button>' : '') });
+    var done = function (msg) { closeModal(true); render(); toast(msg, 'ok'); };
+    if ($('#fu-send', m)) $('#fu-send', m).onclick = function () { var b2 = this; busy(b2, true); Api.write('answerFollowUp', { id: r.FollowUpID, expectedVersion: r.RecordVersion, text: $('#fu-a', m).value }, 'Answer').then(function () { done('Answer sent.'); }, function (e) { busy(b2, false); if (!showFieldErrors(m, e, 'fu-e-')) writeError(e); }); };
+    if ($('#fu-close', m)) $('#fu-close', m).onclick = function () { var b2 = this; busy(b2, true); Api.write('closeFollowUp', { id: r.FollowUpID, expectedVersion: r.RecordVersion }, 'Close follow-up').then(function () { done('Follow-up closed.'); }, function (e) { busy(b2, false); writeError(e); }); };
+    if ($('#fu-again', m)) $('#fu-again', m).onclick = function () { var d = m.querySelector('details'); if (d && !d.open) { d.open = true; $('#fu-n', m).focus(); return; } var b2 = this; busy(b2, true);
+      Api.write('closeFollowUp', { id: r.FollowUpID, expectedVersion: r.RecordVersion, reopen: true, note: $('#fu-n', m).value, dueDate: $('#fu-nd', m).value }, 'Ask again').then(function () { done('Sent back with your note.'); }, function (e) { busy(b2, false); if (!showFieldErrors(m, e, 'fu-e-')) writeError(e); }); };
+    if ($('#fu-reopen', m)) $('#fu-reopen', m).onclick = function () { closeModal(true); var r2 = r; var mm = openModal({ title: 'Reopen follow-up', body: '<label class="lbl req" for="ro-n">What do you still need?</label><textarea id="ro-n" class="input" rows="3"></textarea><div class="err" id="ro-e-note" hidden></div>', foot: '<button class="btn" data-act="closeModal">Cancel</button><button class="btn btn-primary" id="ro-ok">Reopen</button>' });
+      $('#ro-ok', mm).onclick = function () { var b2 = this; busy(b2, true); Api.write('closeFollowUp', { id: r2.FollowUpID, expectedVersion: r2.RecordVersion, reopen: true, note: $('#ro-n', mm).value }, 'Reopen').then(function () { done('Reopened.'); }, function (e) { busy(b2, false); if (!showFieldErrors(mm, e, 'ro-e-')) writeError(e); }); }; };
+  }
+  ACT.fuGoRec = function (el) { closeAllModals(); go(el.dataset.entity); setTimeout(function () { openRecord(el.dataset.entity, el.dataset.id); }, 30); };
+  PAGES.followups = function () {
+    var asker = canAsk(), f = pf('followups', { tab: asker ? 'Waiting' : 'mine' }), all = (S.data.followUps || []).filter(function (r) { return C.live(r) && (!S.g.campaignId || r.CampaignID === S.g.campaignId); });
+    var tabs = asker ? [['Waiting', 'Waiting for an answer'], ['Answered', 'Answered, to review'], ['Closed', 'Closed']] : [['mine', 'Waiting for my answer'], ['Answered', 'Answered'], ['Closed', 'Closed']];
+    var pick = function (tab) { return all.filter(function (r) { return tab === 'mine' ? r.Status === 'Waiting' && isMineToAnswer(r) : r.Status === tab; }); };
+    var rows = pick(f.tab).sort(function (a, b) { return a.DueDate < b.DueDate ? -1 : 1; });
+    return '<div class="page-head"><div><p>' + (asker ? 'Ask an account manager or HR to follow up on any issue, escalation, IR, grievance or campaign: they are emailed, they answer here, and you close it or ask again.' : 'Requests from the site director or an Admin. Answer them here; your answer is emailed back.') + '</p></div></div>' +
+      '<section class="panel"><div class="seg-tabs" role="group" aria-label="Status">' + tabs.map(function (t2) { return '<button data-act="fuTab" data-v="' + t2[0] + '" aria-pressed="' + (f.tab === t2[0]) + '">' + esc(t2[1]) + ' · ' + pick(t2[0]).length + '</button>'; }).join('') + '</div>' +
+      (rows.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Due</th><th>About</th><th>Request</th><th>Asked of</th><th>Asked by</th><th>Status</th></tr></thead><tbody>' + rows.map(function (r) {
+        return '<tr class="click" tabindex="0" data-act="openFu" data-id="' + esc(r.FollowUpID) + '"><td class="' + (C.fuOverdue(r, S.today) ? 'g-bad' : '') + '" style="white-space:nowrap">' + esc(fmtDate(r.DueDate)) + (C.fuOverdue(r, S.today) ? ' · overdue' : '') + '</td><td><div class="t-title">' + esc(r.Title) + '</div><div class="t-sub">' + esc(campName(r.CampaignID) + ' · ' + (r.Entity === 'campaign' ? 'campaign' : LOGCFG[r.Entity].noun)) + '</div></td><td>' + esc(r.Question) + '</td><td>' + esc(C.splitIds(r.ToIDs).map(userName).join(', ')) + '</td><td>' + esc(String(r.CreatedBy).split('@')[0]) + '</td><td>' + statusPill(r.Status) + '</td></tr>'; }).join('') + '</tbody></table></div>'
+        : emptyState('Nothing here', f.tab === 'mine' ? 'No requests are waiting for your answer.' : '')) + '</section>';
+  };
+  ACT.fuTab = function (el) { S.f.followups.tab = el.dataset.v; render(); };
   function simpleForm(o) {
     // o: {title, entity, rec, fields:[{k,label,type,options,req,hint,span}], action, payloadKey, after}
     var r = o.rec || {};
@@ -2549,7 +2731,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       var keys = Object.keys(C.DEFAULT_SETTINGS);
       return '<div class="page-head"><div><p>Changes apply immediately for everyone and are recorded in the audit log.</p></div></div><section class="panel"><div class="panel-b"><div class="fgrid">' + keys.map(function (k) {
         var v = S.settings[k], id = 'st-' + k, input = /Days$/.test(k) ? '<input id="' + id + '" class="input" type="number" min="0" max="999" data-st="' + k + '" value="' + esc(v) + '">' : k === 'Environment' ? '<select id="' + id + '" class="input" data-st="' + k + '">' + opts(['PROTOTYPE', 'PRODUCTION'], v) + '</select>' : '<input id="' + id + '" class="input" data-st="' + k + '" value="' + esc(v) + '">';
-        return '<div><label class="lbl" for="' + id + '">' + esc(({ Timezone: 'Timezone', Environment: 'Environment', IRPendingDays: 'Flag IRs pending longer than (days)', GrievanceDays: 'Flag grievances open longer than (days)', EscalationStaleDays: 'Flag escalations without an update for (days)' })[k] || k) + '</label>' + input + '<div class="hint">' + esc(C.DEFAULT_SETTINGS[k][1]) + '</div><div class="err" id="e-' + k + '" hidden></div></div>';
+        return '<div><label class="lbl" for="' + id + '">' + esc(({ Timezone: 'Timezone', Environment: 'Environment', IRPendingDays: 'Flag IRs pending longer than (days)', GrievanceDays: 'Flag grievances open longer than (days)', EscalationStaleDays: 'Flag escalations without an update for (days)', FollowUpDays: 'Default days to answer a follow-up', AppUrl: 'App address (for links in emails)', WeeklySummaryTo: 'Monday summary sent to (empty = all Executives)' })[k] || k) + '</label>' + input + '<div class="hint">' + esc(C.DEFAULT_SETTINGS[k][1]) + '</div><div class="err" id="e-' + k + '" hidden></div></div>';
       }).join('') + '</div><div class="row" style="margin-top:16px"><button class="btn btn-primary" data-act="saveSettings">Save settings</button></div></div></section>';
     },
     audit: function (f) {

@@ -1506,6 +1506,35 @@ var AGSCore = (function () {
         { key: 'prod', label: 'Productivity (claims per day)', formula: 'round(claims / days)', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 252 }, { grade: 4, min: 177 }, { grade: 3, min: 101 }, { grade: 2, min: 25 }], weight: 50 }],
       groups: {} };
   }
+  // ---------- the other campaigns (AGS OPS KPI 2026). The KPI values are typed directly (no RAW formulas yet);
+  // bands follow the document, with its gaps closed: e.g. QA 75–84.99 = 2, Flyland transfer 4–8.99% = 2,
+  // AF Underwriter 20–25 = 3, AF Contract 100% = 5, Fundward 8,744–11,366 = 3.
+  function qaStd() { return { key: 'qa', label: 'Quality', formula: 'qa', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 100 }, { grade: 4, min: 95 }, { grade: 3, min: 85 }, { grade: 2, min: 75 }], weight: 25 }; }
+  function oneToFive(key, label, weight) { return { key: key, label: label, formula: key, format: 'num', direction: 'higher', bands: [{ grade: 5, min: 5 }, { grade: 4, min: 4 }, { grade: 3, min: 3 }, { grade: 2, min: 2 }], weight: weight }; }
+  function simple(raw, kpi) { return { raw: [R.att, R.qa, raw], kpis: [attKpi(), qaStd(), kpi], groups: {} }; }
+  function otherGuides() {
+    return [
+      ['Flyland', 'Flyland · All agents', '', '', { raw: [R.att, R.qa, { key: 'transfer_rate', label: 'Transfer rate %', type: 'pct' }, { key: 'admits', label: 'No. of admits', type: 'num' }, { key: 'aht', label: 'AHT', type: 'time' }],
+        kpis: [attKpi(), qaStd(),
+          { key: 'transfer', label: 'Transfer rate', formula: 'transfer_rate', format: 'pct', direction: 'higher', group: 'Performance', bands: [{ grade: 5, gt: 15 }, { grade: 4, min: 11 }, { grade: 3, min: 9 }, { grade: 2, min: 4 }] },
+          { key: 'admits_n', label: 'No. of admits', formula: 'admits', format: 'num', direction: 'higher', group: 'Performance', bands: [{ grade: 5, min: 14 }, { grade: 4, min: 9 }, { grade: 3, min: 5 }, { grade: 2, min: 1 }] },
+          { key: 'aht_t', label: 'AHT', formula: 'aht', format: 'time', direction: 'lower', group: 'Performance', bands: [{ grade: 5, lt: 104 }, { grade: 4, max: 140 }, { grade: 3, max: 176 }, { grade: 2, max: 212 }] }],
+        groups: { Performance: 50 } }],
+      ['EMB', 'EMB · VOB', '', 'VOB', simple({ key: 'completed_vob', label: 'Completed VOB %', type: 'pct' },
+        { key: 'completed', label: 'Completed VOB', formula: 'completed_vob', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 96 }, { grade: 4, min: 94 }, { grade: 3, min: 93 }, { grade: 2, min: 90 }], weight: 50 })],
+      ['EMB', 'EMB · Collections', '', 'Collections', simple({ key: 'voc', label: 'VOC score (1–5)', type: 'num' }, oneToFive('voc', 'VOC (voice of the client)', 50))],
+      ['Alternative Funding', 'Alternative Funding · Underwriter', '', 'Underwriter', simple({ key: 'deals', label: 'Average deals per day', type: 'num' },
+        { key: 'deals_day', label: 'Average deals per day', formula: 'deals', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 32 }, { grade: 4, min: 26 }, { grade: 3, min: 20 }, { grade: 2, min: 13 }], weight: 50 })],
+      ['Alternative Funding', 'Alternative Funding · Admin', '', 'Admin', simple({ key: 'reports', label: 'Reports pulled per month', type: 'num' },
+        { key: 'reports_n', label: 'Reports pulled per month', formula: 'reports', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 1351 }, { grade: 4, min: 1201 }, { grade: 3, min: 1200 }, { grade: 2, min: 1049 }], weight: 50 })],
+      ['Alternative Funding', 'Alternative Funding · Contract', '', 'Contract', simple({ key: 'completion', label: 'Completion rate %', type: 'pct' },
+        { key: 'completion_rate', label: 'Completion rate', formula: 'completion', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 100 }, { grade: 3, min: 91 }, { grade: 2, min: 81 }], weight: 50 })],
+      ['Fundward', 'Fundward · Broker Team', '', 'Broker Team', { raw: [R.att, { key: 'productivity', label: 'Productivity', type: 'num' }, { key: 'csat', label: 'CSAT (1–5)', type: 'num' }],
+        kpis: [attKpi(), { key: 'prod', label: 'Productivity goal', formula: 'productivity', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 13990 }, { grade: 4, min: 11367 }, { grade: 3, min: 8744 }, { grade: 2, min: 6120 }], weight: 50 }, oneToFive('csat', 'CSAT', 25)],
+        groups: {} }]
+    ];
+  }
+
   // [campaign, name, shift, profile, definition]
   function startingGuides() {
     return [
@@ -1513,7 +1542,7 @@ var AGSCore = (function () {
       ['Legacy', 'Legacy · AM · Call and chat', 'AM', 'Call and chat', legacyCallChat('AM')], ['Legacy', 'Legacy · PM · Call and chat', 'PM', 'Call and chat', legacyCallChat('PM')],
       ['Legacy', 'Legacy · AM · Chat', 'AM', 'Chat', legacyChat('AM')], ['Legacy', 'Legacy · PM · Chat', 'PM', 'Chat', legacyChat('PM')],
       ['Takahami', 'Takahami · All agents', '', '', takahami()]
-    ];
+    ].concat(otherGuides());
   }
 
   function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -1553,7 +1582,7 @@ var AGSCore = (function () {
         var hire = addDays(year + '-01-01', -between(30, 700)); if (i === size[nm] - 1 && ai % 3 === 0) hire = addDays(today, -between(40, 200));
         var sep = '', st = '';
         if (ai % 7 === 3) { sep = addDays(year + '-01-01', between(20, Math.max(25, diffDays(today, year + '-01-01') - 5))); st = pick(['Resignation', 'Resignation', 'Termination', 'End of contract']); }
-        var a = rec('agents', { EmployeeID: String(26001 + ai), FullName: full, CampaignID: camp[nm].CampaignID, Shift: i % 3 === 0 ? 'AM' : 'PM', Profile: nm === 'Legacy' ? (i >= 8 ? 'Chat' : 'Call and chat') : '',
+        var a = rec('agents', { EmployeeID: String(26001 + ai), FullName: full, CampaignID: camp[nm].CampaignID, Shift: i % 3 === 0 ? 'AM' : 'PM', Profile: nm === 'Legacy' ? (i >= 8 ? 'Chat' : 'Call and chat') : nm === 'EMB' ? (i % 2 ? 'Collections' : 'VOB') : nm === 'Alternative Funding' ? ['Underwriter', 'Admin', 'Contract'][i % 3] : nm === 'Fundward' ? 'Broker Team' : '',
           TeamLead: pick(['Marco Delgado', 'Joanna Cruz', 'Ben Ortega']), HireDate: hire, SeparationDate: sep, SeparationType: st, SeparationReason: sep ? pick(['Better opportunity', 'Personal reasons', 'Attendance policy', 'Contract ended']) : '', Notes: 'Synthetic test agent' }, year + '-01-02');
         D.agents.push(a); skill[a.AgentID] = 0.25 + rnd() * 0.75; ai++;
       }
@@ -1563,13 +1592,20 @@ var AGSCore = (function () {
     for (var m = year + '-01'; m < curMonth; m = monthAdd(m, 1)) months.push(m);
     D.agents.forEach(function (a) {
       var c = D.campaigns.filter(function (x) { return x.CampaignID === a.CampaignID; })[0];
-      if (['Legacy', 'Banyan', 'Takahami'].indexOf(c.Name) < 0) return;
+      if (['TBT'].indexOf(c.Name) >= 0) return;
       months.forEach(function (mo) {
         if (a.HireDate > monthEnd(mo) || (a.SeparationDate && a.SeparationDate < mo + '-01')) return;
         var g = guideFor(D.kpiGuides, a.CampaignID, a.Shift, a.Profile, mo); if (!g) return;
         var sk = skill[a.AgentID] * 0.7 + rnd() * 0.3, raw = { att: Math.min(100, round(88 + sk * 13 + rnd() * 2, 2)), qa: round(76 + sk * 22, 2) };
         if (c.Name === 'Banyan') { var ib = Math.round((a.Shift === 'AM' ? 200 : 500) + sk * (a.Shift === 'AM' ? 420 : 700)), ob = between(2, 24); raw.inbound = ib; raw.outbound = ob; raw.calls = ib + ob; raw.obconv = between(0, 10); var aht = 40 + (1 - sk) * 200; raw.talk = Math.round(aht * 0.85 * raw.calls); raw.hold = Math.round(aht * 0.15 * raw.calls); }
         else if (c.Name === 'Takahami') { raw.days = between(20, 22); raw.claims = Math.round(raw.days * (30 + sk * 230)); }
+        else if (c.Name === 'Flyland') { raw.transfer_rate = round(2 + sk * 16, 2); raw.admits = Math.round(sk * 16); raw.aht = Math.round(90 + (1 - sk) * 150); }
+        else if (a.Profile === 'VOB') raw.completed_vob = round(88 + sk * 10, 2);
+        else if (a.Profile === 'Collections') raw.voc = between(2, 5);
+        else if (a.Profile === 'Underwriter') raw.deals = round(10 + sk * 26, 1);
+        else if (a.Profile === 'Admin') raw.reports = Math.round(1000 + sk * 420);
+        else if (a.Profile === 'Contract') raw.completion = Math.min(100, round(78 + sk * 24, 2));
+        else if (a.Profile === 'Broker Team') { raw.productivity = Math.round(5000 + sk * 10000); raw.csat = between(2, 5); delete raw.qa; }
         else if (a.Profile === 'Chat') { raw.chats = between(180, 330); raw.chat_vob = Math.round(raw.chats * (0.02 + sk * 0.1)); raw.chat_admits = between(0, 5); raw.resp = Math.round(4 + (1 - sk) * 30); }
         else { raw.calls_ib = between(80, 600); raw.transfers = Math.round(raw.calls_ib * (0.02 + sk * 0.12)); raw.admits = Math.round(raw.transfers * rnd() * sk * 0.3); raw.vob = Math.round(raw.calls_ib * (0.02 + sk * 0.07)); var t2 = 90 + (1 - sk) * 260; raw.talk = Math.round(t2 * 0.85 * raw.calls_ib); raw.hold = Math.round(t2 * 0.15 * raw.calls_ib); raw.chat_admits = between(0, 4); }
         var sc = scoreRow(json(g.Definition, {}), raw);
@@ -1577,6 +1613,7 @@ var AGSCore = (function () {
       });
     });
     // logs across the year; the newest ones are mostly still open
+    rnd = mulberry32((opts.seed || 20261027) + 7);   // the logs have their own sequence, so adding KPI data never reshuffles them
     var start = year + '-01-05', span = Math.max(30, diffDays(today, start));
     var agentsIn = function (cid) { return D.agents.filter(function (a) { return a.CampaignID === cid; }); };
     var titles = { issues: ['Missing call recordings', 'Wrong disposition codes', 'Report delivered late', 'Routing to the wrong queue', 'Hold music outage', 'Claims backlog over SLA', 'Client asks for a weekly admits report', 'CRM fields not saving', 'Callback list not worked', 'Login issues on client portal'],
@@ -1613,7 +1650,7 @@ var AGSCore = (function () {
   return {
     CORE_VERSION: CORE_VERSION, APP_NAME: APP_NAME, ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, ASSIGNABLE_ROLES: ASSIGNABLE_ROLES, CAMPAIGN_ROLES: CAMPAIGN_ROLES,
     LISTS: LISTS, CLOSED: CLOSED, slaInfo: slaInfo, slaBreached: slaBreached, slaMonth: slaMonth, slaSettings: slaSettings, monthlyReport: monthlyReport, FOLLOWUP_STATUS: FOLLOWUP_STATUS, fuOverdue: fuOverdue, followUpsFor: followUpsFor, weeklySummary: weeklySummary, htmlEsc: htmlEsc, SCHEMA: SCHEMA, META: META, ENTITIES: ENTITIES, DATA_ENTITIES: DATA_ENTITIES, LOGS: LOGS, DEFAULT_SETTINGS: DEFAULT_SETTINGS, FIELDS: FIELDS,
-    CAMPAIGN_NAMES: CAMPAIGN_NAMES, startingGuides: startingGuides,
+    CAMPAIGN_NAMES: CAMPAIGN_NAMES, startingGuides: startingGuides, otherGuides: otherGuides,
     AgsError: AgsError, s: s, n: n, b: b, isIsoDate: isIsoDate, addDays: addDays, diffDays: diffDays, json: json, arr: arr, rate: rate, fmtRate: fmtRate, round: round, clone: clone,
     isEmail: isEmail, live: live, blank: blank, byKey: byKey, splitIds: splitIds, settingsWithDefaults: settingsWithDefaults, normRole: normRole, periodOf: periodOf, daysInMonth: daysInMonth,
     sanitize: sanitize, parseRaw: parseRaw, fmtTime: fmtTime, fmtKpi: fmtKpi, evalFormula: evalFormula, gradeFor: gradeFor, scoreRow: scoreRow, validateGuide: validateGuide, guideFor: guideFor,
@@ -2376,7 +2413,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var camp = S.idx.camps[cid], guides = inForce(cid, month), rows = S.data.kpiRows.filter(function (r) { return C.live(r) && r.CampaignID === cid && r.Month === month; });
     var sum = C.kpiCampaign(S.data, cid, month), prev = C.kpiCampaign(S.data, cid, C.monthAdd(month, -1));
     var head = '<div class="page-head"><div><p>' + esc(camp ? camp.Name : 'No campaign') + ' · ' + esc(monthLabel(month)) + ' · accountable: ' + esc(accountable(cid)) + '. Grades and the Total Grade are calculated from the RAW numbers with the score guide in force for the month.</p></div><div class="actions">' +
-      (S.g.campaignId ? '' : '<label class="sr-only" for="kpi-camp">Campaign</label><select id="kpi-camp" class="input input-sm" data-change="kpiCampSel">' + campOpts(cid) + '</select>') +
+      (S.g.campaignId ? '' : '<label class="sr-only" for="kpi-camp">Campaign</label><select id="kpi-camp" class="input input-sm" style="width:auto;min-width:180px" data-change="kpiCampSel">' + campOpts(cid) + '</select>') +
       '<label class="check" style="margin:0 6px"><input type="checkbox" data-change="kpiRaw"' + (f.showRaw ? ' checked' : '') + '> Show RAW columns</label>' +
       (canAsk() && cid ? '<button class="btn" data-act="askFu" data-entity="campaign" data-id="' + esc(cid) + '">Ask about this campaign</button>' : '') + (rows.length ? '<button class="btn" data-act="exportKpis">Export CSV</button>' : '') + (cap('writeKpis') && guides.length ? '<button class="btn btn-primary" data-act="enterRaw">Enter RAW numbers</button>' : '') + '</div></div>';
     if (!guides.length) return head + '<section class="panel">' + emptyState('No score guide for ' + esc(camp ? camp.Name : 'this campaign') + ' in ' + esc(monthLabel(month)), cap('manageGuides') ? 'Add one in Settings → Score guides, then enter the RAW numbers.' : 'An Admin adds score guides in Settings.') + '</section>';
@@ -2875,7 +2912,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       { k: 'CampaignID', label: 'Campaign', type: 'select', req: true, options: campOpts(a ? a.CampaignID : S.g.campaignId, 'Select campaign') },
       { k: 'TeamLead', label: 'Team lead', max: 120 },
       { k: 'Shift', label: 'Shift', type: 'select', options: opts([['', 'Not set'], ['AM', 'AM'], ['PM', 'PM']], a ? a.Shift : ''), hint: 'Chooses the score guide when guides differ by shift.' },
-      { k: 'Profile', label: 'Profile', max: 60, hint: 'e.g. "Call and chat" or "Chat" for Legacy. Leave empty if the campaign has one profile.' },
+      { k: 'Profile', label: 'Profile', max: 60, hint: 'Must match the score guide: Legacy "Call and chat" or "Chat"; EMB "VOB" or "Collections"; Alternative Funding "Underwriter", "Admin" or "Contract"; Fundward "Broker Team". Empty if the campaign has one guide.' },
       { k: 'HireDate', label: 'Hire date', type: 'date' }, { k: 'SeparationDate', label: 'Separation date', type: 'date', hint: 'Leave empty while the agent is active.' },
       { k: 'SeparationType', label: 'Separation type', type: 'select', options: opts(C.LISTS.SeparationType, a ? a.SeparationType : '', 'Not separated') },
       { k: 'SeparationReason', label: 'Separation reason', max: 1000 }, { k: 'Notes', label: 'Notes', type: 'textarea', span: 'span2', max: 1000 }] });

@@ -487,7 +487,7 @@ table.t .group-h th{background:var(--surface);border-bottom:0;font-size:11.5px;c
 @media (min-width:1100px) and (max-width:1520px){#sync-pill span{display:none}#sync-pill{padding:6px 9px}.topbar #gsearch{width:140px}#g-camp{max-width:150px}}
 
 /* ---------- operations hub ---------- */
-.modal.xl{max-width:min(1240px,96vw)}
+.modal.xl{max-width:min(1240px,96vw);display:flex;flex-direction:column;max-height:calc(100vh - 72px)} .modal.xl .modal-b{overflow:auto;min-height:0;flex:1 1 auto} .modal.xl .modal-h,.modal.xl .modal-f{flex:none}
 .pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:10px;background:var(--neutral-soft);color:var(--ink-2);white-space:nowrap}
 .pill-info{background:var(--accent-soft);color:var(--accent)} .pill-warn{background:var(--warn-soft);color:var(--warn)} .pill-bad{background:var(--bad-soft);color:var(--bad)} .pill-ok{background:var(--ok-soft);color:var(--ok)}
 .g-bad{color:var(--bad);font-weight:700} .g-warn{color:var(--warn);font-weight:700} .g-ok{color:var(--ok);font-weight:600}
@@ -520,6 +520,15 @@ button.kpi{border:0;text-align:left;font:inherit;color:inherit;cursor:pointer;ba
 .rp-t{width:100%;border-collapse:collapse} .rp-t th,.rp-t td{border-bottom:1px solid #E3E8EF;padding:4px 6px;text-align:left} .rp-t th{font-size:11.5px;color:#555;font-weight:600;background:#F6F8FA} .rp-t .num{text-align:right}
 .rp-2{display:grid;grid-template-columns:1fr 1fr;gap:16px} .rp-foot{margin-top:10px;font-size:11px;color:#666;border-top:1px solid #E3E8EF;padding-top:6px}
 @media print{html,body,.shell,.main,.content,.content-inner{background:#fff!important} .no-print{display:none!important} .rp{border:0;padding:0;max-width:none;font-size:9pt;line-height:1.3} .rp-head{padding-bottom:5px;margin-bottom:7px} .rp-head h1{font-size:15pt} .rp-sec{margin:0 0 7px} .rp-sec h2{font-size:10pt;margin:0 0 3px} .rp-sec h3{font-size:8.5pt;margin:3px 0 1px} .rp-t th,.rp-t td{padding:2px 5px} .rp-t th{font-size:8pt} .rp-2{gap:12px} .rp-foot{margin-top:5px;font-size:7.5pt} .content,.content-inner{padding:0!important} .rp .g-bad{color:#B42318!important} .rp .g-warn{color:#9A5B00!important} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.sc-t td,.sc-t th{white-space:nowrap} .sc-t th{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase} .sc-t td.c,.sc-t th.c{text-align:center} .sc-t tr.inc td{background:#FDF3F1}
+.kv{font-variant-numeric:tabular-nums} .sc-t .th-btn{text-transform:inherit;letter-spacing:inherit;font-size:inherit;color:inherit}
+.gchip{display:inline-block;min-width:22px;padding:1px 6px;border-radius:5px;font-size:12px;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;border:1px solid transparent}
+.gchip.g1{background:#FDECEA;color:#B42318;border-color:#F6C9C3} .gchip.g2{background:#FDEEE3;color:#B54708;border-color:#F7D4BB} .gchip.g3{background:#FEF6E0;color:#8A5300;border-color:#F3E1A9}
+.gchip.g4{background:#EAF6EE;color:#1E7A43;border-color:#C6E6D1} .gchip.g5{background:#DDF1E4;color:#14653A;border-color:#B3DEC2} .gchip.big{font-size:13px;padding:2px 8px}
+.gchip.ghost{background:transparent;color:var(--muted);border:1px dashed var(--line)} .gchip.none{background:transparent;color:var(--muted)}
+.cchip{display:inline-block;padding:1px 8px;border-radius:5px;font-size:12px;font-variant-numeric:tabular-nums;background:#FEF6E0;color:#8A5300;border:1px solid #F3E1A9} .cchip.ok{background:#EAF6EE;color:#1E7A43;border-color:#C6E6D1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .sc-t tr.inc td{background:rgba(180,35,24,.10)}}
+:root[data-theme="dark"] .sc-t tr.inc td{background:rgba(180,35,24,.10)}
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
   .kpi-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -804,29 +813,34 @@ var AGSCore = (function () {
     }
     return 1;
   }
-  // Total Grade = Σ (single KPI weight × grade) + Σ (group weight × average grade of the group's graded KPIs).
-  // A KPI with no value contributes 0 (as in the original KPI sheets).
+  // Total Grade = Σ (single KPI weight × grade) + Σ (group weight × average grade of the group's KPIs).
+  // A KPI with no value gets its guide's "if missing" grade (e.g. performance 1, QA 3); without one it adds nothing.
+  // Sections (performance / attendance / qa) give the PERF grade and how many of the sections were entered.
   function scoreRow(def, raw) {
     var vars = {}, values = {}, grades = {}, errs = [];
     (def.raw || []).forEach(function (f) { vars[f.key] = parseRaw(raw && raw[f.key], f.type); });
     (def.kpis || []).forEach(function (k) {
       var v = null;
       try { v = evalFormula(k.formula || k.key, vars); } catch (e) { errs.push(k.label + ': ' + e.message); }
-      if (v !== null && k.format === 'pct' && k.scale100) v = v * 100;
       values[k.key] = v === null ? null : Math.round(v * 10000) / 10000;
-      grades[k.key] = gradeFor(values[k.key], k);
+      var g = gradeFor(values[k.key], k); if (g === null && k.ifMissing !== undefined && k.ifMissing !== null && k.ifMissing !== '') g = +k.ifMissing;
+      grades[k.key] = g;
     });
-    var total = 0, groups = {};
+    var total = 0, groups = {}, sec = {}, entered = {}, add = function (section, w, g) { var x = sec[section || 'other'] = sec[section || 'other'] || { w: 0, sum: 0 }; x.w += w; x.sum += w * g; };
     (def.kpis || []).forEach(function (k) {
-      if (k.group) { (groups[k.group] = groups[k.group] || []).push(grades[k.key]); return; }
-      if (grades[k.key] !== null) total += (+k.weight || 0) / 100 * grades[k.key];
+      if (values[k.key] !== null) entered[k.section || 'other'] = true; else if (entered[k.section || 'other'] === undefined) entered[k.section || 'other'] = false;
+      if (k.group) { (groups[k.group] = groups[k.group] || { g: [], section: k.section }).g.push(grades[k.key]); return; }
+      if (grades[k.key] !== null) { total += (+k.weight || 0) / 100 * grades[k.key]; add(k.section, +k.weight || 0, grades[k.key]); }
     });
-    Object.keys(groups).forEach(function (g) {
-      var got = groups[g].filter(function (x) { return x !== null; }), w = +((def.groups || {})[g] || 0);
-      if (got.length) total += w / 100 * (got.reduce(function (a, c) { return a + c; }, 0) / got.length);
+    Object.keys(groups).forEach(function (gk) {
+      var got = groups[gk].g.filter(function (x) { return x !== null; }), w = +((def.groups || {})[gk] || 0);
+      if (got.length) { var avg = got.reduce(function (a, c) { return a + c; }, 0) / got.length; total += w / 100 * avg; add(groups[gk].section, w, avg); }
     });
-    var anyGrade = Object.keys(grades).some(function (k2) { return grades[k2] !== null; });
-    return { values: values, grades: grades, total: anyGrade ? Math.round(total * 100) / 100 : null, errors: errs };
+    var anyValue = Object.keys(values).some(function (k2) { return values[k2] !== null; });
+    var perf = sec.performance && sec.performance.w ? Math.round(sec.performance.sum / sec.performance.w * 100) / 100 : null;
+    var secs = Object.keys(entered).filter(function (k2) { return k2 !== 'other'; });
+    return { values: values, grades: grades, total: anyValue ? Math.round(total * 100) / 100 : null, perf: perf, errors: errs,
+      complete: secs.filter(function (k2) { return entered[k2]; }).length, of: secs.length };
   }
   function validateGuide(def, errors) {
     var keys = {}, wsum = 0;
@@ -1304,8 +1318,9 @@ var AGSCore = (function () {
       var def = json(g.Definition, {}), rawIn = r.Raw && typeof r.Raw === 'object' ? r.Raw : {}, rawClean = {};
       (def.raw || []).forEach(function (f) { var v = rawIn[f.key]; if (v === undefined || v === null || s(v).trim() === '') return; var x = parseRaw(v, f.type); if (x === null) errors[label + f.label] = 'Not a valid ' + (f.type === 'time' ? 'time (h:mm:ss)' : 'number') + ': "' + s(v).slice(0, 20) + '".'; else rawClean[f.key] = x; });
       var sc = scoreRow(def, rawClean); if (sc.errors.length) errors[label + 'Formula'] = sc.errors.join(' ');
+      var grades = sc.grades, total = sc.total;
       plan.push({ cur: existing[a.AgentID] || null, ver: r.expectedVersion, fields: { CampaignID: cid, AgentID: a.AgentID, Month: month, Shift: shift, Profile: profile, GuideID: g.GuideID,
-        Raw: JSON.stringify(rawClean), Values: JSON.stringify(sc.values), Grades: JSON.stringify(sc.grades), TotalGrade: sc.total === null ? '' : String(sc.total), Source: 'APP' } });
+        Raw: JSON.stringify(rawClean), Values: JSON.stringify(sc.values), Grades: JSON.stringify(Object.assign({}, grades, { _perf: sc.perf, _complete: sc.complete, _of: sc.of })), TotalGrade: total === null ? '' : String(total), Source: 'APP' } });
     });
     failIf(errors);
     plan.forEach(function (x) {
@@ -1333,7 +1348,7 @@ var AGSCore = (function () {
     ctx.list('kpiRows', function (r) { return r.CampaignID === cid && r.Month === month && r.Source !== 'IMPORT'; }).forEach(function (r) {
       var g = guideFor(guides, cid, r.Shift, r.Profile, month); if (!g) return;
       var sc = scoreRow(json(g.Definition, {}), json(r.Raw, {}));
-      ctx.update('kpiRows', r.RowID, { GuideID: g.GuideID, Values: JSON.stringify(sc.values), Grades: JSON.stringify(sc.grades), TotalGrade: sc.total === null ? '' : String(sc.total) }, null, 'KPI_REGRADED', { internal: true }); n2++;
+      ctx.update('kpiRows', r.RowID, { GuideID: g.GuideID, Values: JSON.stringify(sc.values), Grades: JSON.stringify(Object.assign({}, sc.grades, { _perf: sc.perf, _complete: sc.complete, _of: sc.of })), TotalGrade: sc.total === null ? '' : String(sc.total) }, null, 'KPI_REGRADED', { internal: true }); n2++;
     });
     ctx.primary = { entity: 'kpiRows', id: cid + ' ' + month }; var r2 = ctx.result(); r2.regraded = n2; return r2;
   } };
@@ -1461,81 +1476,43 @@ var AGSCore = (function () {
   var WRITE_ACTIONS = Object.keys(H).filter(function (k) { return H[k].write; });
 
   // ==================================================================
-  // STARTING SCORE GUIDES — from AGS's score guides (Banyan, Legacy, Takahami).
-  // Bands: higher-is-better use min (≥) / gt (>); lower-is-better use max (≤) / lt (<). Anything else = grade 1.
+  // SCORE GUIDES — every campaign: Performance 50% (its KPIs), Attendance 25%, QA 25% (Fundward: CSAT 25%).
+  // The KPI values are typed directly (no RAW numbers). Bands: higher-is-better use min (≥) / gt (>); lower-is-better
+  // use max (≤) / lt (<); anything else = 1. If a value is missing: performance = 1, attendance = 1, QA / CSAT = 3.
   // ==================================================================
   var CAMPAIGN_NAMES = ['Legacy', 'Banyan', 'Takahami', 'Flyland', 'TBT', 'EMB', 'Fundward', 'Alternative Funding'];
-  function attKpi() { return { key: 'att', label: 'Attendance', formula: 'att', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 100 }, { grade: 3, min: 95 }, { grade: 2, min: 90 }], weight: 25 }; }
-  function qaKpi(b5gt, b4, b3, b2, b5min) { return { key: 'qa', label: 'Quality', formula: 'qa', format: 'pct', direction: 'higher', bands: [b5min !== undefined ? { grade: 5, min: b5min } : { grade: 5, gt: b5gt }, { grade: 4, min: b4 }, { grade: 3, min: b3 }, { grade: 2, min: b2 }], weight: 25 }; }
-  var R = {
-    att: { key: 'att', label: 'Attendance %', type: 'pct' }, qa: { key: 'qa', label: 'QA average %', type: 'pct' },
-    talk: { key: 'talk', label: 'Talk time', type: 'time' }, hold: { key: 'hold', label: 'Hold time', type: 'time' }
-  };
-  function banyan(shift) {
-    var am = shift === 'AM';
-    return { raw: [R.att, R.qa, R.talk, R.hold, { key: 'calls', label: 'Calls', type: 'num' }, { key: 'inbound', label: 'Inbound', type: 'num' }, { key: 'outbound', label: 'Outbound', type: 'num' }, { key: 'obconv', label: 'OB conversion', type: 'num' }],
-      kpis: [attKpi(), qaKpi(92, 88, 83, 78),
-        { key: 'aht', label: 'AHT', formula: am ? '(talk + hold) / (inbound + outbound)' : '(talk + hold) / calls', format: 'time', direction: 'lower', bands: [{ grade: 5, lt: 36 }, { grade: 4, max: 90 }, { grade: 3, max: 145 }, { grade: 2, max: 200 }], weight: 25 },
-        { key: 'prod', label: 'Productivity', formula: 'inbound + obconv', format: 'num', direction: 'higher', bands: am ? [{ grade: 5, gt: 571 }, { grade: 4, min: 452 }, { grade: 3, min: 331 }, { grade: 2, min: 210 }] : [{ grade: 5, gt: 1113 }, { grade: 4, min: 931 }, { grade: 3, min: 747 }, { grade: 2, min: 563 }], weight: 25 }],
-      groups: {} };
+  function K(key, label, format, direction, bands, o) { return Object.assign({ key: key, label: label, formula: key, format: format, direction: direction, bands: bands, section: 'performance', ifMissing: 1 }, o || {}); }
+  function attK() { return K('att', 'Attendance', 'pct', 'higher', [{ grade: 5, min: 100 }, { grade: 3, min: 95 }, { grade: 2, min: 90 }], { section: 'attendance', weight: 25, ifMissing: 1 }); }
+  function qaK(b5, b4, b3, b2, b5gt) { return K('qa', 'QA', 'pct', 'higher', [b5gt ? { grade: 5, gt: b5 } : { grade: 5, min: b5 }, { grade: 4, min: b4 }, { grade: 3, min: b3 }, { grade: 2, min: b2 }], { section: 'qa', weight: 25, ifMissing: 3 }); }
+  function qaStd() { return qaK(100, 95, 85, 75); }
+  function direct(perf, groups, extra) {
+    var kpis = perf.concat(extra || [attK(), qaStd()]);
+    return { raw: kpis.map(function (k) { return { key: k.key, label: k.label + (k.format === 'pct' ? ' %' : ''), type: k.format === 'time' ? 'time' : k.format === 'pct' ? 'pct' : 'num' }; }), kpis: kpis, groups: groups || {} };
   }
+  function one(k, extra) { k.weight = 50; return direct([k], null, extra); }
+  function shared(list, extra) { list.forEach(function (k) { k.group = 'Performance'; }); return direct(list, { Performance: 50 }, extra); }
+  function banyan(shift) {
+    return shared([K('aht', 'AHT', 'time', 'lower', [{ grade: 5, lt: 36 }, { grade: 4, max: 90 }, { grade: 3, max: 145 }, { grade: 2, max: 200 }]),
+      K('prod', 'Productivity', 'num', 'higher', shift === 'AM' ? [{ grade: 5, gt: 571 }, { grade: 4, min: 452 }, { grade: 3, min: 331 }, { grade: 2, min: 210 }] : [{ grade: 5, gt: 1113 }, { grade: 4, min: 931 }, { grade: 3, min: 747 }, { grade: 2, min: 563 }])],
+      [attK(), qaK(92, 88, 83, 78, true)]);
+  }
+  function chatVob(am) { return am ? [{ grade: 5, min: 9 }, { grade: 4, min: 7 }, { grade: 3, min: 5 }, { grade: 2, min: 3 }] : [{ grade: 5, min: 12 }, { grade: 4, min: 9 }, { grade: 3, min: 6 }, { grade: 2, min: 3 }]; }
+  var CHAT_ADM = [{ grade: 5, min: 4 }, { grade: 4, min: 3 }, { grade: 3, min: 2 }];
   function legacyCallChat(shift) {
-    var am = shift === 'AM';
-    return { raw: [R.att, R.qa, { key: 'calls_ib', label: 'Calls (IB)', type: 'num' }, { key: 'transfers', label: 'Transfers', type: 'num' }, { key: 'admits', label: 'Admits', type: 'num' }, { key: 'vob', label: 'VOB', type: 'num' }, R.talk, R.hold,
-        { key: 'chat_admits', label: 'Chat admits', type: 'num' }, { key: 'chats', label: 'Chats handled', type: 'num' }, { key: 'chat_vob', label: 'Chat VOB', type: 'num' }],
-      kpis: [attKpi(), qaKpi(92, 89, 83, 79),
-        { key: 'transfer', label: 'Transfer rate', formula: 'transfers / calls_ib * 100', format: 'pct', direction: 'higher', group: 'Calls', bands: am ? [{ grade: 5, min: 15 }, { grade: 4, min: 11 }, { grade: 3, min: 7 }, { grade: 2, min: 3 }] : [{ grade: 5, min: 11 }, { grade: 4, min: 8 }, { grade: 3, min: 5 }, { grade: 2, min: 2 }] },
-        { key: 'vob_rate', label: 'VOB rate', formula: 'vob / calls_ib * 100', format: 'pct', direction: 'higher', group: 'Calls', bands: am ? [{ grade: 5, min: 7 }, { grade: 4, min: 6 }, { grade: 3, min: 5 }, { grade: 2, min: 4 }] : [{ grade: 5, min: 6 }, { grade: 4, min: 5 }, { grade: 3, min: 4 }, { grade: 2, min: 3 }] },
-        { key: 'adm_rate', label: 'Admission rate', formula: 'admits / transfers * 100', format: 'pct', direction: 'higher', group: 'Calls', bands: [{ grade: 5, min: 18 }, { grade: 4, min: 12 }, { grade: 3, min: 6 }, { grade: 2, min: 0.1 }] },
-        { key: 'aht', label: 'AHT', formula: '(talk + hold) / calls_ib', format: 'time', direction: 'lower', group: 'Calls', bands: [{ grade: 5, lt: 112 }, { grade: 3, max: 180 }, { grade: 2, max: 251 }] },
-        { key: 'chat_adm', label: 'Chat admits', formula: 'chat_admits', format: 'num', direction: 'higher', group: 'Chat', bands: [{ grade: 5, min: 4 }, { grade: 4, min: 3 }, { grade: 3, min: 2 }] },
-        { key: 'chat_vob_rate', label: 'Chat VOB rate', formula: 'chat_vob / chats * 100', format: 'pct', direction: 'higher', group: 'Chat', bands: am ? [{ grade: 5, min: 9 }, { grade: 4, min: 7 }, { grade: 3, min: 5 }, { grade: 2, min: 3 }] : [{ grade: 5, min: 12 }, { grade: 4, min: 9 }, { grade: 3, min: 6 }, { grade: 2, min: 3 }] }],
-      groups: { Calls: 40, Chat: 10 } };
+    var am = shift === 'AM', calls = function (k) { k.group = 'Calls'; return k; }, chat = function (k) { k.group = 'Chat'; delete k.ifMissing; return k; };   // blank chat KPIs are left out, as on the Legacy sheet
+    return direct([
+      calls(K('transfer', 'Transfer rate', 'pct', 'higher', am ? [{ grade: 5, min: 15 }, { grade: 4, min: 11 }, { grade: 3, min: 7 }, { grade: 2, min: 3 }] : [{ grade: 5, min: 11 }, { grade: 4, min: 8 }, { grade: 3, min: 5 }, { grade: 2, min: 2 }])),
+      calls(K('vob_rate', 'VOB rate', 'pct', 'higher', am ? [{ grade: 5, min: 7 }, { grade: 4, min: 6 }, { grade: 3, min: 5 }, { grade: 2, min: 4 }] : [{ grade: 5, min: 6 }, { grade: 4, min: 5 }, { grade: 3, min: 4 }, { grade: 2, min: 3 }])),
+      calls(K('adm_rate', 'Admission rate', 'pct', 'higher', [{ grade: 5, min: 18 }, { grade: 4, min: 12 }, { grade: 3, min: 6 }, { grade: 2, min: 0.1 }])),
+      calls(K('aht', 'AHT', 'time', 'lower', [{ grade: 5, lt: 112 }, { grade: 3, max: 180 }, { grade: 2, max: 251 }])),
+      chat(K('chat_adm', 'Chat admits', 'num', 'higher', CHAT_ADM)), chat(K('chat_vob_rate', 'Chat VOB rate', 'pct', 'higher', chatVob(am)))
+    ], { Calls: 40, Chat: 10 }, [attK(), qaK(92, 89, 83, 79, true)]);
   }
   function legacyChat(shift) {
-    var am = shift === 'AM';
-    return { raw: [R.att, R.qa, { key: 'chats', label: 'Chats handled', type: 'num' }, { key: 'chat_vob', label: 'Chat VOB', type: 'num' }, { key: 'chat_admits', label: 'Chat admits', type: 'num' }, { key: 'resp', label: 'Avg response time', type: 'time' }],
-      kpis: [attKpi(), qaKpi(92, 89, 83, 79),
-        { key: 'resp_time', label: 'Avg response time', formula: 'resp', format: 'time', direction: 'lower', group: 'Chat', bands: [{ grade: 5, lt: 10 }, { grade: 4, max: 15 }, { grade: 3, max: 30 }] },
-        { key: 'chat_adm', label: 'Chat admits', formula: 'chat_admits', format: 'num', direction: 'higher', group: 'Chat', bands: [{ grade: 5, min: 4 }, { grade: 4, min: 3 }, { grade: 3, min: 2 }] },
-        { key: 'chat_vob_rate', label: 'Chat VOB rate', formula: 'chat_vob / chats * 100', format: 'pct', direction: 'higher', group: 'Chat', bands: am ? [{ grade: 5, min: 9 }, { grade: 4, min: 7 }, { grade: 3, min: 5 }, { grade: 2, min: 3 }] : [{ grade: 5, min: 12 }, { grade: 4, min: 9 }, { grade: 3, min: 6 }, { grade: 2, min: 3 }] }],
-      groups: { Chat: 50 } };
+    return shared([K('resp_time', 'Avg response time', 'time', 'lower', [{ grade: 5, lt: 10 }, { grade: 4, max: 15 }, { grade: 3, max: 30 }]), K('chat_adm', 'Chat admits', 'num', 'higher', CHAT_ADM), K('chat_vob_rate', 'Chat VOB rate', 'pct', 'higher', chatVob(shift === 'AM'))],
+      [attK(), qaK(92, 89, 83, 79, true)]);
   }
-  function takahami() {
-    return { raw: [R.att, R.qa, { key: 'claims', label: 'Claims MTD', type: 'num' }, { key: 'days', label: 'Scheduled days', type: 'num' }],
-      kpis: [attKpi(), qaKpi(0, 95, 85, 75, 100),
-        { key: 'prod', label: 'Productivity (claims per day)', formula: 'round(claims / days)', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 252 }, { grade: 4, min: 177 }, { grade: 3, min: 101 }, { grade: 2, min: 25 }], weight: 50 }],
-      groups: {} };
-  }
-  // ---------- the other campaigns (AGS OPS KPI 2026). The KPI values are typed directly (no RAW formulas yet);
-  // bands follow the document, with its gaps closed: e.g. QA 75–84.99 = 2, Flyland transfer 4–8.99% = 2,
-  // AF Underwriter 20–25 = 3, AF Contract 100% = 5, Fundward 8,744–11,366 = 3.
-  function qaStd() { return { key: 'qa', label: 'Quality', formula: 'qa', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 100 }, { grade: 4, min: 95 }, { grade: 3, min: 85 }, { grade: 2, min: 75 }], weight: 25 }; }
-  function oneToFive(key, label, weight) { return { key: key, label: label, formula: key, format: 'num', direction: 'higher', bands: [{ grade: 5, min: 5 }, { grade: 4, min: 4 }, { grade: 3, min: 3 }, { grade: 2, min: 2 }], weight: weight }; }
-  function simple(raw, kpi) { return { raw: [R.att, R.qa, raw], kpis: [attKpi(), qaStd(), kpi], groups: {} }; }
-  function otherGuides() {
-    return [
-      ['Flyland', 'Flyland · All agents', '', '', { raw: [R.att, R.qa, { key: 'transfer_rate', label: 'Transfer rate %', type: 'pct' }, { key: 'admits', label: 'No. of admits', type: 'num' }, { key: 'aht', label: 'AHT', type: 'time' }],
-        kpis: [attKpi(), qaStd(),
-          { key: 'transfer', label: 'Transfer rate', formula: 'transfer_rate', format: 'pct', direction: 'higher', group: 'Performance', bands: [{ grade: 5, gt: 15 }, { grade: 4, min: 11 }, { grade: 3, min: 9 }, { grade: 2, min: 4 }] },
-          { key: 'admits_n', label: 'No. of admits', formula: 'admits', format: 'num', direction: 'higher', group: 'Performance', bands: [{ grade: 5, min: 14 }, { grade: 4, min: 9 }, { grade: 3, min: 5 }, { grade: 2, min: 1 }] },
-          { key: 'aht_t', label: 'AHT', formula: 'aht', format: 'time', direction: 'lower', group: 'Performance', bands: [{ grade: 5, lt: 104 }, { grade: 4, max: 140 }, { grade: 3, max: 176 }, { grade: 2, max: 212 }] }],
-        groups: { Performance: 50 } }],
-      ['EMB', 'EMB · VOB', '', 'VOB', simple({ key: 'completed_vob', label: 'Completed VOB %', type: 'pct' },
-        { key: 'completed', label: 'Completed VOB', formula: 'completed_vob', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 96 }, { grade: 4, min: 94 }, { grade: 3, min: 93 }, { grade: 2, min: 90 }], weight: 50 })],
-      ['EMB', 'EMB · Collections', '', 'Collections', simple({ key: 'voc', label: 'VOC score (1–5)', type: 'num' }, oneToFive('voc', 'VOC (voice of the client)', 50))],
-      ['Alternative Funding', 'Alternative Funding · Underwriter', '', 'Underwriter', simple({ key: 'deals', label: 'Average deals per day', type: 'num' },
-        { key: 'deals_day', label: 'Average deals per day', formula: 'deals', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 32 }, { grade: 4, min: 26 }, { grade: 3, min: 20 }, { grade: 2, min: 13 }], weight: 50 })],
-      ['Alternative Funding', 'Alternative Funding · Admin', '', 'Admin', simple({ key: 'reports', label: 'Reports pulled per month', type: 'num' },
-        { key: 'reports_n', label: 'Reports pulled per month', formula: 'reports', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 1351 }, { grade: 4, min: 1201 }, { grade: 3, min: 1200 }, { grade: 2, min: 1049 }], weight: 50 })],
-      ['Alternative Funding', 'Alternative Funding · Contract', '', 'Contract', simple({ key: 'completion', label: 'Completion rate %', type: 'pct' },
-        { key: 'completion_rate', label: 'Completion rate', formula: 'completion', format: 'pct', direction: 'higher', bands: [{ grade: 5, min: 100 }, { grade: 3, min: 91 }, { grade: 2, min: 81 }], weight: 50 })],
-      ['Fundward', 'Fundward · Broker Team', '', 'Broker Team', { raw: [R.att, { key: 'productivity', label: 'Productivity', type: 'num' }, { key: 'csat', label: 'CSAT (1–5)', type: 'num' }],
-        kpis: [attKpi(), { key: 'prod', label: 'Productivity goal', formula: 'productivity', format: 'num', direction: 'higher', bands: [{ grade: 5, gt: 13990 }, { grade: 4, min: 11367 }, { grade: 3, min: 8744 }, { grade: 2, min: 6120 }], weight: 50 }, oneToFive('csat', 'CSAT', 25)],
-        groups: {} }]
-    ];
-  }
-
+  function takahami() { return one(K('prod', 'Claims per day', 'num', 'higher', [{ grade: 5, gt: 252 }, { grade: 4, min: 177 }, { grade: 3, min: 101 }, { grade: 2, min: 25 }]), [attK(), qaK(100, 95, 85, 75)]); }
   // [campaign, name, shift, profile, definition]
   function startingGuides() {
     return [
@@ -1544,6 +1521,23 @@ var AGSCore = (function () {
       ['Legacy', 'Legacy · AM · Chat', 'AM', 'Chat', legacyChat('AM')], ['Legacy', 'Legacy · PM · Chat', 'PM', 'Chat', legacyChat('PM')],
       ['Takahami', 'Takahami · All agents', '', '', takahami()]
     ].concat(otherGuides());
+  }
+  // From AGS OPS KPI 2026, with the document's gaps closed (e.g. QA 75–84.99 = 2, Flyland transfer 4–8.99% = 2,
+  // AF Underwriter 20–25 = 3, AF Contract 100% = 5, Fundward 8,744–11,366 = 3) and EMB's bands from its scorecard.
+  function otherGuides() {
+    return [
+      ['Flyland', 'Flyland · All agents', '', '', shared([
+        K('transfer', 'Transfer rate', 'pct', 'higher', [{ grade: 5, gt: 15 }, { grade: 4, min: 11 }, { grade: 3, min: 9 }, { grade: 2, min: 4 }]),
+        K('admits', 'No. of admits', 'num', 'higher', [{ grade: 5, min: 14 }, { grade: 4, min: 9 }, { grade: 3, min: 5 }, { grade: 2, min: 1 }]),
+        K('aht', 'AHT', 'time', 'lower', [{ grade: 5, lt: 104 }, { grade: 4, max: 140 }, { grade: 3, max: 176 }, { grade: 2, max: 212 }])])],
+      ['EMB', 'EMB · VOB', '', 'VOB', one(K('completed_vob', 'Completed VOB', 'num', 'higher', [{ grade: 5, min: 15 }, { grade: 4, min: 10 }, { grade: 3, min: 9 }, { grade: 2, min: 4 }]))],
+      ['EMB', 'EMB · Collections', '', 'Collections', one(K('points', 'Points per facilities', 'num', 'higher', [{ grade: 5, min: 146 }, { grade: 4, min: 91 }, { grade: 3, min: 36 }, { grade: 2, min: 8 }]))],
+      ['Alternative Funding', 'Alternative Funding · Underwriter', '', 'Underwriter', one(K('deals', 'Average deals per day', 'num', 'higher', [{ grade: 5, gt: 32 }, { grade: 4, min: 26 }, { grade: 3, min: 20 }, { grade: 2, min: 13 }]))],
+      ['Alternative Funding', 'Alternative Funding · Admin', '', 'Admin', one(K('reports', 'Reports pulled per month', 'num', 'higher', [{ grade: 5, gt: 1351 }, { grade: 4, min: 1201 }, { grade: 3, min: 1200 }, { grade: 2, min: 1049 }]))],
+      ['Alternative Funding', 'Alternative Funding · Contract', '', 'Contract', one(K('completion', 'Completion rate', 'pct', 'higher', [{ grade: 5, min: 100 }, { grade: 3, min: 91 }, { grade: 2, min: 81 }]))],
+      ['Fundward', 'Fundward · Broker Team', '', 'Broker Team', one(K('productivity', 'Productivity goal', 'num', 'higher', [{ grade: 5, gt: 13990 }, { grade: 4, min: 11367 }, { grade: 3, min: 8744 }, { grade: 2, min: 6120 }]),
+        [attK(), K('csat', 'CSAT', 'num', 'higher', [{ grade: 5, min: 5 }, { grade: 4, min: 4 }, { grade: 3, min: 3 }, { grade: 2, min: 2 }], { section: 'qa', weight: 25, ifMissing: 3 })])]
+    ];
   }
 
   function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -1588,29 +1582,32 @@ var AGSCore = (function () {
         D.agents.push(a); skill[a.AgentID] = 0.25 + rnd() * 0.75; ai++;
       }
     });
-    // KPI rows: January to last month for the three campaigns with guides
+    // KPI rows: January to last month, for every campaign with a guide. Each value is drawn inside the band of a grade
+    // that follows the agent's skill; a few QA values are left empty (graded 3) and a few rows miss their performance.
+    function valueFor(k, grade) {
+      var bs = k.bands || [], hi = k.direction !== 'lower', b2 = bs.filter(function (x) { return x.grade === grade; })[0], lowest = bs[bs.length - 1];
+      var edge = function (x) { return [x.min, x.gt, x.max, x.lt].filter(function (v) { return v !== undefined; })[0]; };
+      if (!b2) { if (!lowest) return null; var e = edge(lowest); return hi ? e * (0.4 + rnd() * 0.5) : e * (1.05 + rnd() * 0.5); }
+      var lo = edge(b2), up = bs.indexOf(b2) > 0 ? edge(bs[bs.indexOf(b2) - 1]) : (hi ? lo * 1.25 + 1 : lo * 0.6);
+      return hi ? lo + (up - lo) * rnd() * 0.9 : up + (lo - up) * (0.1 + rnd() * 0.9);
+    }
     var curMonth = today.slice(0, 7), months = [];
     for (var m = year + '-01'; m < curMonth; m = monthAdd(m, 1)) months.push(m);
     D.agents.forEach(function (a) {
-      var c = D.campaigns.filter(function (x) { return x.CampaignID === a.CampaignID; })[0];
-      if (['TBT'].indexOf(c.Name) >= 0) return;
       months.forEach(function (mo) {
         if (a.HireDate > monthEnd(mo) || (a.SeparationDate && a.SeparationDate < mo + '-01')) return;
         var g = guideFor(D.kpiGuides, a.CampaignID, a.Shift, a.Profile, mo); if (!g) return;
-        var sk = skill[a.AgentID] * 0.7 + rnd() * 0.3, raw = { att: Math.min(100, round(88 + sk * 13 + rnd() * 2, 2)), qa: round(76 + sk * 22, 2) };
-        if (c.Name === 'Banyan') { var ib = Math.round((a.Shift === 'AM' ? 200 : 500) + sk * (a.Shift === 'AM' ? 420 : 700)), ob = between(2, 24); raw.inbound = ib; raw.outbound = ob; raw.calls = ib + ob; raw.obconv = between(0, 10); var aht = 40 + (1 - sk) * 200; raw.talk = Math.round(aht * 0.85 * raw.calls); raw.hold = Math.round(aht * 0.15 * raw.calls); }
-        else if (c.Name === 'Takahami') { raw.days = between(20, 22); raw.claims = Math.round(raw.days * (30 + sk * 230)); }
-        else if (c.Name === 'Flyland') { raw.transfer_rate = round(2 + sk * 16, 2); raw.admits = Math.round(sk * 16); raw.aht = Math.round(90 + (1 - sk) * 150); }
-        else if (a.Profile === 'VOB') raw.completed_vob = round(88 + sk * 10, 2);
-        else if (a.Profile === 'Collections') raw.voc = between(2, 5);
-        else if (a.Profile === 'Underwriter') raw.deals = round(10 + sk * 26, 1);
-        else if (a.Profile === 'Admin') raw.reports = Math.round(1000 + sk * 420);
-        else if (a.Profile === 'Contract') raw.completion = Math.min(100, round(78 + sk * 24, 2));
-        else if (a.Profile === 'Broker Team') { raw.productivity = Math.round(5000 + sk * 10000); raw.csat = between(2, 5); delete raw.qa; }
-        else if (a.Profile === 'Chat') { raw.chats = between(180, 330); raw.chat_vob = Math.round(raw.chats * (0.02 + sk * 0.1)); raw.chat_admits = between(0, 5); raw.resp = Math.round(4 + (1 - sk) * 30); }
-        else { raw.calls_ib = between(80, 600); raw.transfers = Math.round(raw.calls_ib * (0.02 + sk * 0.12)); raw.admits = Math.round(raw.transfers * rnd() * sk * 0.3); raw.vob = Math.round(raw.calls_ib * (0.02 + sk * 0.07)); var t2 = 90 + (1 - sk) * 260; raw.talk = Math.round(t2 * 0.85 * raw.calls_ib); raw.hold = Math.round(t2 * 0.15 * raw.calls_ib); raw.chat_admits = between(0, 4); }
-        var sc = scoreRow(json(g.Definition, {}), raw);
-        D.kpiRows.push(rec('kpiRows', { CampaignID: a.CampaignID, AgentID: a.AgentID, Month: mo, Shift: a.Shift, Profile: a.Profile, GuideID: g.GuideID, Raw: JSON.stringify(raw), Values: JSON.stringify(sc.values), Grades: JSON.stringify(sc.grades), TotalGrade: sc.total === null ? '' : String(sc.total), Source: 'APP' }, monthEnd(mo)));
+        var def = json(g.Definition, {}), sk = skill[a.AgentID] * 0.75 + rnd() * 0.25, raw = {};
+        def.kpis.forEach(function (k) {
+          if (k.section === 'qa' && rnd() < 0.15) return; if (k.section === 'performance' && rnd() < 0.05) return;
+          var grade = Math.max(1, Math.min(5, Math.round(1 + sk * 4 + (rnd() - 0.5))));
+          if (k.key === 'att' && grade === 4) grade = rnd() < 0.5 ? 3 : 5;
+          var v = valueFor(k, grade); if (v === null) return;
+          raw[k.key] = k.format === 'time' ? Math.round(v) : k.format === 'pct' ? Math.min(100, round(v, 2)) : (Math.abs(v) < 10 && k.bands.some(function (x) { return x.min === 0.1; }) ? round(v, 2) : Math.round(v));
+        });
+        var sc = scoreRow(def, raw);
+        D.kpiRows.push(rec('kpiRows', { CampaignID: a.CampaignID, AgentID: a.AgentID, Month: mo, Shift: a.Shift, Profile: a.Profile, GuideID: g.GuideID, Raw: JSON.stringify(raw), Values: JSON.stringify(sc.values),
+          Grades: JSON.stringify(Object.assign({}, sc.grades, { _perf: sc.perf, _complete: sc.complete, _of: sc.of })), TotalGrade: sc.total === null ? '' : String(sc.total), Source: 'APP' }, monthEnd(mo)));
       });
     });
     // logs across the year; the newest ones are mostly still open
@@ -2396,7 +2393,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   ACT.goGuides = function (el, ev) { if (ev) ev.preventDefault(); pf('settings', { tab: 'guides' }).tab = 'guides'; go('settings'); };
   ACT.openAttn = function (el) { var e = el.dataset.entity; if (e === 'followUps') { go('followups'); setTimeout(function () { openFollowUp(el.dataset.id); }, 30); return; } if (e === 'kpi') { pf('kpis', {}).campaignId = el.dataset.id; go('kpis'); return; } if (el.dataset.id) { go(e); setTimeout(function () { openRecord(e, el.dataset.id); }, 30); } else go(e); };
 
-  // ================= KPIs =================
+  // ================= KPIs (scorecard layout: KPI values typed directly) =================
   function guideDef(g) { return C.json(g && g.Definition, { raw: [], kpis: [], groups: {} }); }
   function kpiCampaignId(f) {
     var cid = S.g.campaignId || f.campaignId;
@@ -2405,101 +2402,93 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     return (withGuide[0] || activeCamps()[0] || {}).CampaignID || '';
   }
   function guidesFor(cid) { return S.data.kpiGuides.filter(function (g) { return C.live(g) && C.b(g.Active) && g.CampaignID === cid; }); }
-  function inForce(cid, month) {   // the guides in force this month, one per shift/profile
+  function inForce(cid, month) {
     var seen = {}, out = [];
     guidesFor(cid).sort(function (a, b) { return a.EffectiveFrom < b.EffectiveFrom ? 1 : -1; }).forEach(function (g) { var k = g.Shift + '|' + g.Profile; if (g.EffectiveFrom <= month && !seen[k]) { seen[k] = 1; out.push(g); } });
     return out.sort(function (a, b) { return (a.Shift + a.Profile) < (b.Shift + b.Profile) ? -1 : 1; });
   }
   function rawShown(f2, v) { return v === null || v === undefined || v === '' ? '' : f2.type === 'time' ? C.fmtTime(v) : String(v); }
-  PAGES.kpis = function () {
-    var f = pf('kpis', { campaignId: '', showRaw: false, sort: 'name', dir: 1 }), cid = kpiCampaignId(f), month = S.g.month;
-    f.campaignId = cid;
-    var camp = S.idx.camps[cid], guides = inForce(cid, month), rows = S.data.kpiRows.filter(function (r) { return C.live(r) && r.CampaignID === cid && r.Month === month; });
-    var sum = C.kpiCampaign(S.data, cid, month), prev = C.kpiCampaign(S.data, cid, C.monthAdd(month, -1));
-    var head = '<div class="page-head"><div><p>' + esc(camp ? camp.Name : 'No campaign') + ' · ' + esc(monthLabel(month)) + ' · accountable: ' + esc(accountable(cid)) + '. Grades and the Total Grade are calculated from the RAW numbers with the score guide in force for the month.</p></div><div class="actions">' +
-      (S.g.campaignId ? '' : '<label class="sr-only" for="kpi-camp">Campaign</label><select id="kpi-camp" class="input input-sm" style="width:auto;min-width:180px" data-change="kpiCampSel">' + campOpts(cid) + '</select>') +
-      '<label class="check" style="margin:0 6px"><input type="checkbox" data-change="kpiRaw"' + (f.showRaw ? ' checked' : '') + '> Show RAW columns</label>' +
-      (canAsk() && cid ? '<button class="btn" data-act="askFu" data-entity="campaign" data-id="' + esc(cid) + '">Ask about this campaign</button>' : '') + (rows.length ? '<button class="btn" data-act="exportKpis">Export CSV</button>' : '') + (cap('writeKpis') && guides.length ? '<button class="btn btn-primary" data-act="enterRaw">Enter RAW numbers</button>' : '') + '</div></div>';
-    if (!guides.length) return head + '<section class="panel">' + emptyState('No score guide for ' + esc(camp ? camp.Name : 'this campaign') + ' in ' + esc(monthLabel(month)), cap('manageGuides') ? 'Add one in Settings → Score guides, then enter the RAW numbers.' : 'An Admin adds score guides in Settings.') + '</section>';
-    var tables = guides.map(function (g) {
-      var def = guideDef(g), gr = rows.filter(function (r) { return r.GuideID === g.GuideID || (!guides.some(function (x) { return x.GuideID === r.GuideID; }) && r.Shift === g.Shift && r.Profile === g.Profile); });
-      gr = gr.slice().sort(function (a, b) { var x = f.sort === 'total' ? (+a.TotalGrade || 0) - (+b.TotalGrade || 0) : agName(a.AgentID).localeCompare(agName(b.AgentID)); return x * f.dir; });
-      var cols = '<th><button class="th-btn" data-act="kpiSort" data-k="name">Agent</button></th>' + (f.showRaw ? def.raw.map(function (r2) { return '<th class="num raw-col">' + esc(r2.label) + '</th>'; }).join('') : '') +
-        def.kpis.map(function (k) { return '<th class="num">' + esc(k.label) + '</th><th class="num">Grade</th>'; }).join('') + '<th class="num tot-col"><button class="th-btn" data-act="kpiSort" data-k="total">Total Grade</button></th>';
-      var body = gr.map(function (r) {
-        var vals = C.json(r.Values, {}), grades = C.json(r.Grades, {}), raw = C.json(r.Raw, {});
-        return '<tr><td class="t-title">' + esc(agName(r.AgentID)) + (r.Source === 'IMPORT' ? ' <span class="pill" title="Imported with the grades recorded at the time">imported</span>' : '') + '</td>' +
-          (f.showRaw ? def.raw.map(function (r2) { return '<td class="num raw-col">' + esc(rawShown(r2, raw[r2.key])) + '</td>'; }).join('') : '') +
-          def.kpis.map(function (k) { var gv = grades[k.key]; return '<td class="num">' + esc(C.fmtKpi(vals[k.key], k.format) || '—') + '</td><td class="num ' + gradeCls(gv) + '">' + (gv === null || gv === undefined ? '—' : gv.toFixed(2)) + '</td>'; }).join('') +
-          '<td class="num tot-col ' + totalCls(r.TotalGrade) + '"><b>' + (r.TotalGrade === '' ? '—' : (+r.TotalGrade).toFixed(2)) + '</b></td></tr>';
-      }).join('');
-      var weights = def.kpis.filter(function (k) { return !k.group; }).map(function (k) { return k.label + ' ' + k.weight + '%'; }).concat(Object.keys(def.groups || {}).map(function (gk) { return gk + ' group ' + def.groups[gk] + '% (' + def.kpis.filter(function (k) { return k.group === gk; }).map(function (k) { return k.label; }).join(', ') + ')'; }));
-      return '<section class="panel" style="margin-bottom:16px"><div class="panel-h"><div><h2>' + esc(g.Name) + '</h2><span class="sub">Score guide effective ' + esc(monthLabel(g.EffectiveFrom)) + ' · weights: ' + esc(weights.join(' · ')) + '</span></div><span class="muted small">' + gr.length + ' agent' + (gr.length === 1 ? '' : 's') + '</span></div>' +
-        (gr.length ? '<div class="table-wrap"><table class="t kpi-t"><thead><tr>' + cols + '</tr></thead><tbody>' + body + '</tbody></table></div>' : emptyState('No results yet', cap('writeKpis') ? 'Use Enter RAW numbers to add this month.' : '')) + '</section>';
-    }).join('');
-    var dist = sum ? sum.dist : [0, 0, 0, 0, 0], maxD = Math.max(1, Math.max.apply(null, dist));
-    var side = '<aside class="stack"><section class="panel"><div class="panel-h"><h2>' + esc(monthLabel(month)) + ' at a glance</h2></div><div class="panel-b">' +
-      (sum ? '<div class="row" style="gap:24px"><div><div class="big-num ' + totalCls(sum.total) + '">' + sum.total.toFixed(2) + '</div><div class="small muted">Average Total Grade</div></div><div><div class="big-num">' + (prev ? deltaTxt(C.round(sum.total - prev.total, 2)) : '<span class="muted">—</span>') + '</div><div class="small muted">vs ' + esc(monthLabel(C.monthAdd(month, -1))) + '</div></div></div>' +
-        '<div style="margin-top:14px">' + ['1', '2', '3', '4', '5'].map(function (gd, i) { return '<div class="dist-row"><span>Grade ' + gd + '</span><span class="dist-track"><span style="width:' + (dist[i] / maxD * 100) + '%"></span></span><b>' + dist[i] + '</b></div>'; }).join('') + '</div><p class="small muted" style="margin:10px 0 0">Total Grade rounded to the nearest whole grade.</p>'
-        : '<p class="muted" style="margin:0">No results for this month yet.</p>') + '</div></section></aside>';
-    return head + '<div class="grid g-dash"><div>' + tables + '</div>' + side + '</div>';
-  };
-  CHG.kpiCampSel = function (el) { S.f.kpis.campaignId = el.value; render(); };
-  CHG.kpiRaw = function (el) { S.f.kpis.showRaw = el.checked; render(); };
-  ACT.kpiSort = function (el) { var f = S.f.kpis; if (f.sort === el.dataset.k) f.dir = -f.dir; else { f.sort = el.dataset.k; f.dir = el.dataset.k === 'total' ? -1 : 1; } render(); };
-  ACT.exportKpis = function () {
-    var cid = S.f.kpis.campaignId, month = S.g.month, rows = S.data.kpiRows.filter(function (r) { return C.live(r) && r.CampaignID === cid && r.Month === month; }), heads = {}, kp = {};
-    rows.forEach(function (r) { var d = guideDef(S.idx.guides[r.GuideID]); d.kpis.forEach(function (k) { heads[k.key] = k.label; kp[k.key] = k; }); });
-    var keys = Object.keys(heads);
-    downloadCsv('kpis_' + campName(cid) + '_' + month, ['Month', 'Campaign', 'Agent', 'Employee ID', 'Shift', 'Profile', 'Score guide'].concat(keys.reduce(function (a, k) { return a.concat([heads[k], heads[k] + ' grade']); }, [])).concat(['Total Grade']),
-      rows.map(function (r) { var v = C.json(r.Values, {}), g = C.json(r.Grades, {}); return [month, campName(cid), agName(r.AgentID), ag(r.AgentID).EmployeeID || '', r.Shift, r.Profile, (S.idx.guides[r.GuideID] || {}).Name || ''].concat(keys.reduce(function (a, k) { return a.concat([C.fmtKpi(v[k], kp[k].format), g[k] === null || g[k] === undefined ? '' : g[k]]); }, [])).concat([r.TotalGrade === '' ? '' : +r.TotalGrade]); }), { campaignId: cid, month: month });
-  };
-  // ---------- entering RAW numbers ----------
   function agentsForGuide(cid, g, month) {
     var end = C.monthEnd(month), start = month + '-01';
     return S.data.agents.filter(function (a) { return C.live(a) && a.CampaignID === cid && (!a.HireDate || a.HireDate <= end) && (!a.SeparationDate || a.SeparationDate >= start) && (!g.Shift || a.Shift === g.Shift) && (!g.Profile || a.Profile === g.Profile); })
       .sort(function (a, b) { return a.FullName < b.FullName ? -1 : 1; });
   }
-  ACT.enterRaw = function () {
-    var cid = S.f.kpis.campaignId, month = S.g.month, guides = inForce(cid, month), gi = 0;
-    var m = openModal({ title: 'Enter RAW numbers · ' + esc(campName(cid)) + ' · ' + esc(monthLabel(month)), size: 'xl', sticky: true,
-      body: '<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><label class="lbl" for="rw-g" style="margin:0">Score guide</label><select id="rw-g" class="input input-sm" style="width:auto">' + opts(guides.map(function (g, i) { return [i, g.Name]; }), 0) + '</select>' +
-        '<span class="small muted">One row per agent. Percentages as 94.27, times as h:mm:ss. Leave a cell empty if there is no value.</span></div>' +
-        '<details style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600">Paste from Excel</summary><p class="small muted">Copy the rows from your sheet, with a header row whose column names match the ones below (the agent\'s name or Employee ID in the first column), and paste them here.</p><textarea id="rw-paste" class="input" rows="4" placeholder="Agent	Attendance %	QA average %	…"></textarea><div class="row" style="margin-top:6px"><button class="btn btn-sm" data-act="rawPaste">Fill the grid</button><span id="rw-paste-msg" class="small muted"></span></div></details>' +
-        '<div id="rw-grid"></div><div id="rw-err"></div>',
+  function gnum(v) { return v === null || v === undefined || v === '' ? null : +v; }
+  function gtxt(v) { v = gnum(v); return v === null ? '—' : (Math.round(v * 100) % 100 === 0 ? String(Math.round(v)) : v.toFixed(2)); }
+  function chip(v, big) { var g = gnum(v); if (g === null) return '<span class="gchip none">—</span>'; return '<span class="gchip g' + Math.max(1, Math.min(5, Math.round(g))) + (big ? ' big' : '') + '">' + gtxt(g) + '</span>'; }
+  function kpiVal(k, v) { return v === null || v === undefined ? '' : C.fmtKpi(v, k.format); }
+  PAGES.kpis = function () {
+    var f = pf('kpis', { campaignId: '', sort: 'name', dir: 1 }), cid = kpiCampaignId(f), month = S.g.month;
+    f.campaignId = cid;
+    var camp = S.idx.camps[cid], guides = inForce(cid, month), rowsAll = S.data.kpiRows.filter(function (r) { return C.live(r) && r.CampaignID === cid && r.Month === month; });
+    var byAgent = {}; rowsAll.forEach(function (r) { byAgent[r.AgentID] = r; });
+    var sum = C.kpiCampaign(S.data, cid, month), prev = C.kpiCampaign(S.data, cid, C.monthAdd(month, -1));
+    var head = '<div class="page-head"><div><p>' + esc(camp ? camp.Name : 'No campaign') + ' · ' + esc(monthLabel(month)) + ' · accountable: ' + esc(accountable(cid)) + '. Overall = Performance 50% + Attendance 25% + QA 25%. A value not entered counts as the grade shown in grey.</p></div><div class="actions">' +
+      (S.g.campaignId ? '' : '<label class="sr-only" for="kpi-camp">Campaign</label><select id="kpi-camp" class="input input-sm" style="width:auto;min-width:180px" data-change="kpiCampSel">' + campOpts(cid) + '</select>') +
+      (canAsk() && cid ? '<button class="btn" data-act="askFu" data-entity="campaign" data-id="' + esc(cid) + '">Ask about this campaign</button>' : '') + (rowsAll.length ? '<button class="btn" data-act="exportKpis">Export CSV</button>' : '') +
+      (cap('writeKpis') && guides.length ? '<button class="btn btn-primary" data-act="enterKpis" data-guide="">Enter KPIs</button>' : '') + '</div></div>';
+    if (!guides.length) return head + '<section class="panel">' + emptyState('No score guide for ' + esc(camp ? camp.Name : 'this campaign') + ' in ' + esc(monthLabel(month)), cap('manageGuides') ? 'Add one in Settings → Score guides.' : 'An Admin adds score guides in Settings.') + '</section>';
+    var complete = rowsAll.filter(function (r) { var g = C.json(r.Grades, {}); return g._complete >= g._of; }).length, low = rowsAll.filter(function (r) { return r.TotalGrade !== '' && +r.TotalGrade < 2.5; }).length;
+    var strip = '<div class="kpi-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">' +
+      '<div class="kpi"><span class="k-label">Average overall</span><span class="k-value">' + (sum ? sum.total.toFixed(2) : '—') + '</span><span class="k-sub">' + (sum && prev ? deltaTxt(C.round(sum.total - prev.total, 2)) + ' vs ' + esc(monthLabel(C.monthAdd(month, -1)).split(' ')[0]) : '&nbsp;') + '</span></div>' +
+      '<div class="kpi"><span class="k-label">Agents graded</span><span class="k-value">' + rowsAll.length + '</span><span class="k-sub">' + complete + ' complete (3 of 3)</span></div>' +
+      '<div class="kpi"><span class="k-label">Overall 4 and above</span><span class="k-value">' + (sum ? sum.dist[3] + sum.dist[4] : 0) + '</span><span class="k-sub">agents</span></div>' +
+      '<div class="kpi"><span class="k-label">Overall below 2.5</span><span class="k-value ' + (low ? 'g-bad' : '') + '">' + low + '</span><span class="k-sub">agents</span></div></div>';
+    var tables = guides.map(function (g) {
+      var def = guideDef(g), perfK = def.kpis.filter(function (k) { return k.section === 'performance'; }), attK2 = def.kpis.filter(function (k) { return k.section === 'attendance'; })[0], qaK2 = def.kpis.filter(function (k) { return k.section === 'qa'; })[0];
+      var ags = agentsForGuide(cid, g, month), seen = {}; ags.forEach(function (a) { seen[a.AgentID] = 1; });
+      rowsAll.forEach(function (r) { if (!seen[r.AgentID] && (r.GuideID === g.GuideID || (r.Shift === g.Shift && r.Profile === g.Profile))) { var a = ag(r.AgentID); if (a.AgentID) { ags.push(a); seen[a.AgentID] = 1; } } });
+      var list = ags.map(function (a) { var r = byAgent[a.AgentID]; return { a: a, r: r, total: r && r.TotalGrade !== '' ? +r.TotalGrade : null }; });
+      if (f.sort === 'overall') list.sort(function (x, y) { return ((x.total === null ? -1 : x.total) - (y.total === null ? -1 : y.total)) * f.dir; });
+      var cell = function (k, vals, grades) { if (!k) return '<td></td>'; var v = vals[k.key], gr = grades[k.key], missing = v === null || v === undefined;
+        return '<td class="c"><span class="kv">' + (missing ? '<span class="muted">—</span>' : esc(kpiVal(k, v))) + '</span> ' + (missing && gr !== null && gr !== undefined ? '<span class="gchip ghost" title="No value entered: counts as ' + gtxt(gr) + '">' + gtxt(gr) + '</span>' : missing ? '' : chip(gr)) + '</td>'; };
+      var body = list.map(function (x, idx) {
+        var r = x.r, vals = r ? C.json(r.Values, {}) : {}, grades = r ? C.json(r.Grades, {}) : {}, of = (perfK.length ? 1 : 0) + (attK2 ? 1 : 0) + (qaK2 ? 1 : 0), done = r ? (grades._complete || 0) : 0;
+        return '<tr class="' + (done < of ? 'inc' : '') + '"><td class="muted">' + (idx + 1) + '</td><td><div class="t-title">' + esc(x.a.FullName) + '</div><div class="t-sub">' + esc(x.a.EmployeeID || '') + '</div></td>' +
+          perfK.map(function (k) { return cell(k, vals, grades); }).join('') + '<td class="c">' + (r ? chip(grades._perf) : '<span class="gchip none">—</span>') + '</td>' + cell(attK2, vals, grades) + cell(qaK2, vals, grades) +
+          '<td class="c">' + (r ? chip(x.total, true) : '<span class="gchip none">—</span>') + '</td><td class="c"><span class="cchip' + (done >= of ? ' ok' : '') + '">' + done + ' of ' + of + '</span></td></tr>';
+      }).join('');
+      return '<section class="panel" style="margin-bottom:16px"><div class="panel-h"><div><h2>' + esc(g.Name) + '</h2><span class="sub">Performance 50%: ' + esc(perfK.map(function (k) { return k.label; }).join(', ')) + ' · Attendance 25% · ' + esc(qaK2 ? qaK2.label : 'QA') + ' 25% · score guide from ' + esc(monthLabel(g.EffectiveFrom)) + '</span></div>' +
+        (cap('writeKpis') ? '<button class="btn btn-sm" data-act="enterKpis" data-guide="' + esc(g.GuideID) + '">Enter KPIs</button>' : '') + '</div>' +
+        (list.length ? '<div class="table-wrap"><table class="t sc-t"><thead><tr><th>#</th><th>Agent</th>' + perfK.map(function (k) { return '<th class="c">' + esc(k.label) + '</th>'; }).join('') +
+          '<th class="c">Perf</th><th class="c">Attnd</th><th class="c">' + esc(qaK2 ? qaK2.label : 'QA') + '</th><th class="c"><button class="th-btn" data-act="kpiSort" data-k="overall">Overall' + (f.sort === 'overall' ? (f.dir > 0 ? ' ▲' : ' ▼') : '') + '</button></th><th class="c">Complete</th></tr></thead><tbody>' + body + '</tbody></table></div>'
+          : emptyState('No agents for this score guide', 'Check each agent\'s shift and profile in Settings → Agents.')) + '</section>';
+    }).join('');
+    return head + strip + tables;
+  };
+  CHG.kpiCampSel = function (el) { S.f.kpis.campaignId = el.value; render(); };
+  ACT.kpiSort = function (el) { var f = S.f.kpis; if (f.sort === el.dataset.k) f.dir = -f.dir; else { f.sort = el.dataset.k; f.dir = -1; } render(); };
+  ACT.exportKpis = function () {
+    var cid = S.f.kpis.campaignId, month = S.g.month, rows = S.data.kpiRows.filter(function (r) { return C.live(r) && r.CampaignID === cid && r.Month === month; }), heads = {}, kp = {};
+    rows.forEach(function (r) { var d = guideDef(S.idx.guides[r.GuideID]); d.kpis.forEach(function (k) { heads[k.key] = k.label; kp[k.key] = k; }); });
+    var keys = Object.keys(heads);
+    downloadCsv('kpis_' + campName(cid) + '_' + month, ['Month', 'Campaign', 'Agent', 'Employee ID', 'Shift', 'Profile', 'Score guide'].concat(keys.reduce(function (a, k) { return a.concat([heads[k], heads[k] + ' grade']); }, [])).concat(['Perf', 'Overall', 'Complete']),
+      rows.map(function (r) { var v = C.json(r.Values, {}), g = C.json(r.Grades, {}); return [month, campName(cid), agName(r.AgentID), ag(r.AgentID).EmployeeID || '', r.Shift, r.Profile, (S.idx.guides[r.GuideID] || {}).Name || ''].concat(keys.reduce(function (a, k) { return a.concat([v[k] === null || v[k] === undefined ? '' : C.fmtKpi(v[k], kp[k].format), g[k] === null || g[k] === undefined ? '' : g[k]]); }, [])).concat([g._perf === null || g._perf === undefined ? '' : g._perf, r.TotalGrade === '' ? '' : +r.TotalGrade, (g._complete || 0) + ' of ' + (g._of || 3)]); }), { campaignId: cid, month: month });
+  };
+  ACT.enterKpis = function (el) {
+    var cid = S.f.kpis.campaignId, month = S.g.month, guides = inForce(cid, month), gi = Math.max(0, guides.map(function (g) { return g.GuideID; }).indexOf(el.dataset.guide));
+    var m = openModal({ title: 'Enter KPIs · ' + esc(campName(cid)) + ' · ' + esc(monthLabel(month)), size: 'xl', sticky: true,
+      body: '<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"><label class="lbl" for="rw-g" style="margin:0">Score guide</label><select id="rw-g" class="input input-sm" style="width:auto">' + opts(guides.map(function (g, i) { return [i, g.Name]; }), gi) + '</select>' +
+        '<span class="small muted">Percentages as 95.45, times as m:ss or h:mm:ss. Leave a cell empty if there is no value yet.</span></div><div id="rw-grid"></div><div id="rw-err"></div>',
       foot: '<span class="left small muted" id="rw-count"></span><button class="btn" data-act="closeModal">Cancel</button><button class="btn btn-primary" id="rw-save">Save and grade</button>' });
     function grid() {
       var g = guides[gi], def = guideDef(g), ags = agentsForGuide(cid, g, month), existing = {};
       S.data.kpiRows.forEach(function (r) { if (C.live(r) && r.CampaignID === cid && r.Month === month) existing[r.AgentID] = r; });
-      $('#rw-grid', m).innerHTML = ags.length ? '<div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="t raw-grid"><thead><tr><th>Agent</th>' + def.raw.map(function (r2) { return '<th>' + esc(r2.label) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-        ags.map(function (a) { var raw = C.json((existing[a.AgentID] || {}).Raw, {}); return '<tr data-agent="' + esc(a.AgentID) + '" data-ver="' + esc((existing[a.AgentID] || {}).RecordVersion || '') + '"><td class="t-title">' + esc(a.FullName) + '<div class="t-sub">' + esc([a.EmployeeID, a.Shift, a.Profile].filter(Boolean).join(' · ')) + '</div></td>' +
-          def.raw.map(function (r2) { return '<td><input class="input input-sm" aria-label="' + esc(a.FullName + ' ' + r2.label) + '" data-k="' + esc(r2.key) + '" value="' + esc(rawShown(r2, raw[r2.key])) + '" placeholder="' + (r2.type === 'time' ? 'h:mm:ss' : r2.type === 'pct' ? '%' : '') + '"></td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>'
+      $('#rw-grid', m).innerHTML = ags.length ? '<div class="table-wrap" style="max-height:56vh;overflow:auto"><table class="t raw-grid"><thead><tr><th>Agent</th>' + def.kpis.map(function (k) { return '<th>' + esc(k.label) + (k.format === 'pct' ? ' %' : '') + (k.ifMissing !== undefined ? '<div class="t-sub" style="font-weight:400">if empty: ' + k.ifMissing + '</div>' : '') + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        ags.map(function (a) { var raw = C.json((existing[a.AgentID] || {}).Raw, {}); return '<tr data-agent="' + esc(a.AgentID) + '"><td class="t-title">' + esc(a.FullName) + '<div class="t-sub">' + esc([a.EmployeeID, a.Shift, a.Profile].filter(Boolean).join(' · ')) + '</div></td>' +
+          def.raw.map(function (r2) { return '<td><input class="input input-sm" aria-label="' + esc(a.FullName + ' ' + r2.label) + '" data-k="' + esc(r2.key) + '" value="' + esc(rawShown(r2, raw[r2.key])) + '" placeholder="' + (r2.type === 'time' ? 'm:ss' : r2.type === 'pct' ? '%' : '') + '"></td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>'
         : emptyState('No agents match this score guide in ' + monthLabel(month), 'Check each agent\'s shift and profile in Settings → Agents.');
       $('#rw-count', m).textContent = ags.length + ' agents';
     }
     $('#rw-g', m).onchange = function () { gi = +this.value; grid(); }; grid();
-    m._paste = function () {
-      var txt = $('#rw-paste', m).value.replace(/\r/g, '').split('\n').filter(function (l) { return l.trim(); }), def = guideDef(guides[gi]);
-      if (txt.length < 2) { $('#rw-paste-msg', m).textContent = 'Paste a header row and at least one agent row.'; return; }
-      var hdr = txt[0].split('\t').map(function (h) { return h.trim().toLowerCase(); }), map = {};
-      def.raw.forEach(function (r2) { var i = hdr.indexOf(r2.label.toLowerCase()); if (i < 0) i = hdr.indexOf(r2.key); if (i >= 0) map[r2.key] = i; });
-      var filled = 0, missing = [];
-      txt.slice(1).forEach(function (line) {
-        var c = line.split('\t'), who = (c[0] || '').trim().toLowerCase(), tr = $$('tr[data-agent]', m).filter(function (t2) { var a = ag(t2.dataset.agent); return a.FullName.toLowerCase() === who || String(a.EmployeeID || '').toLowerCase() === who; })[0];
-        if (!tr) { if (who) missing.push(c[0]); return; }
-        Object.keys(map).forEach(function (k) { var inp = tr.querySelector('input[data-k="' + k + '"]'); if (inp && c[map[k]] !== undefined) inp.value = c[map[k]].trim(); }); filled++;
-      });
-      $('#rw-paste-msg', m).textContent = filled + ' agent' + (filled === 1 ? '' : 's') + ' filled from ' + Object.keys(map).length + ' matching columns.' + (missing.length ? ' Not found: ' + missing.slice(0, 6).join(', ') + (missing.length > 6 ? '…' : '') : '');
-    };
     $('#rw-save', m).onclick = function () {
       var btn = this, rows = $$('tr[data-agent]', m).map(function (tr) { var raw = {}, any = false; $$('input[data-k]', tr).forEach(function (i) { if (i.value.trim()) { raw[i.dataset.k] = i.value.trim(); any = true; } }); return any ? { AgentID: tr.dataset.agent, Shift: ag(tr.dataset.agent).Shift, Profile: ag(tr.dataset.agent).Profile, Raw: raw } : null; }).filter(Boolean);
-      if (!rows.length) { toast('Enter at least one agent\'s numbers.', 'warn'); return; }
+      if (!rows.length) { toast('Enter at least one agent\'s KPIs.', 'warn'); return; }
       busy(btn, true);
       Api.write('saveKpiRows', { campaignId: cid, month: month, rows: rows }, 'KPIs ' + campName(cid) + ' ' + month).then(function () { closeModal(true); render(); toast(rows.length + ' agents graded.', 'ok'); },
-        function (e) { busy(btn, false); var fl = e && e.details && e.details.fields; $('#rw-err', m).innerHTML = '<div class="note bad" style="margin-top:10px">' + esc(e.message) + (fl ? '<br>' + Object.keys(fl).slice(0, 12).map(function (k) { return esc(k + ' ' + fl[k]); }).join('<br>') : '') + '</div>'; });
+        function (e) { busy(btn, false); var fl = e && e.details && e.details.fields; $('#rw-err', m).innerHTML = '<div class="note bad" style="margin-top:10px">' + esc(e.message) + (fl ? '<br>' + Object.keys(fl).slice(0, 12).map(function (k2) { return esc(k2 + ' ' + fl[k2]); }).join('<br>') : '') + '</div>'; });
     };
   };
-  ACT.rawPaste = function (el) { var m = el.closest('.modal-backdrop'); if (m && m._paste) m._paste(); };
 
   // ================= shared write helpers =================
   function busy(btn, on) { if (!btn) return; btn.disabled = on; if (on) { btn.dataset.label = btn.textContent; btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;margin-right:6px"></span>Saving…'; } else if (btn.dataset.label) btn.textContent = btn.dataset.label; }
@@ -2869,7 +2858,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     },
     guides: function () {
       var byC = {}; S.data.kpiGuides.filter(C.live).forEach(function (g) { (byC[g.CampaignID] = byC[g.CampaignID] || []).push(g); });
-      return '<div class="page-head"><div><p>Each score guide turns RAW numbers into KPIs, grades (1–5) and a Total Grade. When bands change, add a new version with a later "effective from" month: earlier months keep the grades they were given.</p></div><div class="actions"><button class="btn btn-primary" data-act="editGuide">Add score guide</button></div></div>' +
+      return '<div class="page-head"><div><p>Each score guide turns the month\'s KPI values into grades (1–5) and an Overall grade: Performance 50%, Attendance 25%, QA 25%. When bands change, add a new version with a later "effective from" month: earlier months keep the grades they were given.</p></div><div class="actions"><button class="btn btn-primary" data-act="editGuide">Add score guide</button></div></div>' +
         liveCamps().map(function (c) {
           var gs = (byC[c.CampaignID] || []).sort(function (a, b) { return (a.Name + a.EffectiveFrom) < (b.Name + b.EffectiveFrom) ? -1 : 1; });
           return '<section class="panel" style="margin-bottom:12px"><div class="panel-h"><h2>' + esc(c.Name) + '</h2><span class="sub">' + (gs.length ? gs.length + ' guide version' + (gs.length === 1 ? '' : 's') : 'No score guide yet') + '</span></div>' +
@@ -2946,53 +2935,54 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   }
   function guideEditor(g, asNewVersion) {
     var def = guideDef(g), isNew = !g || asNewVersion;
-    var rawRow = function (r2) { return '<tr class="ge-raw"><td><input class="input input-sm" data-f="key" value="' + esc(r2.key || '') + '" placeholder="calls_ib"></td><td><input class="input input-sm" data-f="label" value="' + esc(r2.label || '') + '" placeholder="Calls (IB)"></td><td><select class="input input-sm" data-f="type">' + opts([['num', 'Number'], ['pct', 'Percent'], ['time', 'Time (h:mm:ss)']], r2.type || 'num') + '</select></td><td><button class="btn btn-sm btn-ghost" data-act="geDel" aria-label="Remove">×</button></td></tr>'; };
-    var kpiRow = function (k) { return '<tr class="ge-kpi"><td><input class="input input-sm" data-f="label" value="' + esc(k.label || '') + '" placeholder="Transfer rate"></td><td><input class="input input-sm" data-f="formula" value="' + esc(k.formula || '') + '" placeholder="transfers / calls_ib * 100"></td>' +
-      '<td><select class="input input-sm" data-f="format">' + opts([['pct', '%'], ['time', 'Time'], ['num', 'Number']], k.format || 'num') + '</select></td><td><select class="input input-sm" data-f="direction">' + opts([['higher', 'Higher'], ['lower', 'Lower']], k.direction || 'higher') + '</select></td>' +
-      '<td><input class="input input-sm" data-f="weight" value="' + esc(k.group ? '' : (k.weight === undefined ? '' : k.weight)) + '" placeholder="25" style="width:60px"></td><td><input class="input input-sm" data-f="group" value="' + esc(k.group || '') + '" placeholder="(none)" style="width:90px"></td>' +
-      '<td><input class="input input-sm" data-f="bands" value="' + esc(bandsToText(k)) + '" placeholder="5: >= 100; 3: >= 95; 2: >= 90"><input type="hidden" data-f="key" value="' + esc(k.key || '') + '"></td><td><button class="btn btn-sm btn-ghost" data-act="geDel" aria-label="Remove">×</button></td></tr>'; };
+    var kpiRow = function (k) { return '<tr class="ge-kpi"><td><input class="input input-sm" data-f="label" value="' + esc(k.label || '') + '" placeholder="Completed VOB"><input type="hidden" data-f="key" value="' + esc(k.key || '') + '"></td>' +
+      '<td><select class="input input-sm" data-f="section">' + opts([['performance', 'Performance'], ['attendance', 'Attendance'], ['qa', 'QA / CSAT']], k.section || 'performance') + '</select></td>' +
+      '<td><select class="input input-sm" data-f="format">' + opts([['num', 'Number'], ['pct', '%'], ['time', 'Time']], k.format || 'num') + '</select></td><td><select class="input input-sm" data-f="direction">' + opts([['higher', 'Higher'], ['lower', 'Lower']], k.direction || 'higher') + '</select></td>' +
+      '<td><input class="input input-sm" data-f="weight" value="' + esc(k.group ? '' : (k.weight === undefined ? '' : k.weight)) + '" placeholder="50" style="width:60px"></td><td><input class="input input-sm" data-f="group" value="' + esc(k.group || '') + '" placeholder="(none)" style="width:100px"></td>' +
+      '<td><input class="input input-sm" data-f="bands" value="' + esc(bandsToText(k)) + '" placeholder="5: >= 15; 4: >= 10; 3: >= 9; 2: >= 4"></td>' +
+      '<td><select class="input input-sm" data-f="ifMissing" style="width:auto">' + opts([['', 'Leave out'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5']], k.ifMissing === undefined || k.ifMissing === null ? '' : String(k.ifMissing)) + '</select></td><td><button class="btn btn-sm btn-ghost" data-act="geDel" aria-label="Remove">×</button></td></tr>'; };
     var groups = Object.keys(def.groups || {}).map(function (gk) { return gk + ' ' + def.groups[gk]; }).join(', ');
+    var starter = def.kpis.length ? def.kpis : [{ section: 'performance', weight: 50, ifMissing: 1 }, { key: 'att', label: 'Attendance', section: 'attendance', format: 'pct', weight: 25, ifMissing: 1, bands: [{ grade: 5, min: 100 }, { grade: 3, min: 95 }, { grade: 2, min: 90 }] }, { key: 'qa', label: 'QA', section: 'qa', format: 'pct', weight: 25, ifMissing: 3, bands: [{ grade: 5, min: 100 }, { grade: 4, min: 95 }, { grade: 3, min: 85 }, { grade: 2, min: 75 }] }];
     var m = openModal({ title: isNew ? (asNewVersion ? 'New version of ' + esc(g.Name) : 'Add score guide') : 'Edit ' + esc(g.Name), size: 'xl', sticky: true,
       body: '<div class="fgrid"><div><label class="lbl req" for="ge-c">Campaign</label><select id="ge-c" class="input">' + campOpts(g ? g.CampaignID : S.g.campaignId, 'Select campaign') + '</select><div class="err" id="ge-e-CampaignID" hidden></div></div>' +
-        '<div><label class="lbl req" for="ge-n">Name</label><input id="ge-n" class="input" value="' + esc(g ? g.Name : '') + '" placeholder="e.g. Flyland · AM"><div class="err" id="ge-e-Name" hidden></div></div>' +
+        '<div><label class="lbl req" for="ge-n">Name</label><input id="ge-n" class="input" value="' + esc(g ? g.Name : '') + '" placeholder="e.g. TBT · All agents"><div class="err" id="ge-e-Name" hidden></div></div>' +
         '<div><label class="lbl" for="ge-s">Shift</label><select id="ge-s" class="input">' + opts([['', 'Any shift'], ['AM', 'AM'], ['PM', 'PM']], g ? g.Shift : '') + '</select></div>' +
         '<div><label class="lbl" for="ge-p">Profile</label><input id="ge-p" class="input" value="' + esc(g ? g.Profile : '') + '" placeholder="Any profile"></div>' +
         '<div><label class="lbl req" for="ge-m">Effective from</label><input id="ge-m" class="input" type="month" value="' + esc(asNewVersion ? S.today.slice(0, 7) : g ? g.EffectiveFrom : S.today.slice(0, 7)) + '"><div class="err" id="ge-e-EffectiveFrom" hidden></div></div>' +
         '<div><span class="lbl">Status</span><label class="check"><input type="checkbox" id="ge-a"' + (!g || C.b(g.Active) ? ' checked' : '') + '> Active</label></div></div>' +
-        '<h3 class="ge-h">RAW fields <span class="small muted">— what you type or paste each month. Keys are used in formulas.</span></h3><div class="table-wrap"><table class="t ge"><thead><tr><th>Key</th><th>Column name</th><th>Type</th><th></th></tr></thead><tbody id="ge-raw">' + (def.raw.length ? def.raw : [{}]).map(rawRow).join('') + '</tbody></table></div><button class="btn btn-sm" data-act="geAddRaw">Add RAW field</button>' +
-        '<h3 class="ge-h">KPIs <span class="small muted">— formula uses RAW keys with + − × ÷ ( ) and round(). Give each KPI a weight, or put it in a group that shares a weight.</span></h3><div class="table-wrap"><table class="t ge"><thead><tr><th>KPI</th><th>Formula</th><th>Shown as</th><th>Better</th><th>Weight %</th><th>Group</th><th>Grade bands (anything else = 1)</th><th></th></tr></thead><tbody id="ge-kpi">' + (def.kpis.length ? def.kpis : [{}]).map(kpiRow).join('') + '</tbody></table></div><button class="btn btn-sm" data-act="geAddKpi">Add KPI</button>' +
-        '<div class="fgrid" style="margin-top:12px"><div class="span2"><label class="lbl" for="ge-g">Group weights</label><input id="ge-g" class="input" value="' + esc(groups) + '" placeholder="e.g. Calls 40, Chat 10"><div class="hint">A group\'s weight applies to the average grade of its KPIs. All weights together must total 100%.</div></div></div><div id="ge-err"></div>',
+        '<h3 class="ge-h">KPIs <span class="small muted">— the values entered each month. Bands: "5: >= 15; 4: >= 10" (higher is better) or "5: < 1:44; 4: <= 2:20" (lower is better); anything else is 1. "If empty" is the grade used when no value is entered.</span></h3>' +
+        '<div class="table-wrap"><table class="t ge"><thead><tr><th>KPI</th><th>Section</th><th>Shown as</th><th>Better</th><th>Weight %</th><th>Group</th><th>Grade bands</th><th>If empty</th><th></th></tr></thead><tbody id="ge-kpi">' + starter.map(kpiRow).join('') + '</tbody></table></div><button class="btn btn-sm" data-act="geAddKpi">Add KPI</button>' +
+        '<div class="fgrid" style="margin-top:12px"><div class="span2"><label class="lbl" for="ge-g">Group weights</label><input id="ge-g" class="input" value="' + esc(groups) + '" placeholder="e.g. Performance 50"><div class="hint">Several performance KPIs can share one weight: give them the same Group, and put the group\'s weight here (their average grade × the weight). All weights together must total 100%.</div></div></div><div id="ge-err"></div>',
       foot: '<span class="left small muted" id="ge-sum"></span><button class="btn" data-act="closeModal">Cancel</button><button class="btn btn-primary" id="ge-save">Save score guide</button>' });
-    m._addRaw = function () { $('#ge-raw', m).insertAdjacentHTML('beforeend', rawRow({})); };
-    m._addKpi = function () { $('#ge-kpi', m).insertAdjacentHTML('beforeend', kpiRow({})); };
+    m._addKpi = function () { $('#ge-kpi', m).insertAdjacentHTML('beforeend', kpiRow({ section: 'performance', ifMissing: 1 })); };
     function collect() {
-      var raw = $$('tr.ge-raw', m).map(function (tr) { var o = {}; $$('[data-f]', tr).forEach(function (i) { o[i.dataset.f] = i.value.trim(); }); return o; }).filter(function (o) { return o.key || o.label; });
       var errs = [], used = {};
       var kpis = $$('tr.ge-kpi', m).map(function (tr, i) {
-        var o = {}; $$('[data-f]', tr).forEach(function (x) { o[x.dataset.f] = x.value.trim(); }); if (!o.label && !o.formula) return null;
-        var key = o.key || (o.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'kpi') ; while (used[key]) key += '_' + (i + 1); used[key] = 1;
+        var o = {}; $$('[data-f]', tr).forEach(function (x) { o[x.dataset.f] = x.value.trim(); }); if (!o.label) return null;
+        var key = o.key || (o.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').replace(/^(\d)/, 'k$1') || 'kpi'); while (used[key]) key += '_' + (i + 1); used[key] = 1;
         var bd = textToBands(o.bands, o.format); if (bd.error) errs.push(o.label + ': ' + bd.error);
-        var k = { key: key, label: o.label, formula: o.formula, format: o.format, direction: o.direction, bands: bd.bands || [] };
+        var k = { key: key, label: o.label, formula: key, format: o.format, direction: o.direction, section: o.section, bands: bd.bands || [] };
+        if (o.ifMissing !== '') k.ifMissing = +o.ifMissing;
         if (o.group) k.group = o.group; else k.weight = Number(o.weight) || 0; return k;
       }).filter(Boolean);
-      var groups2 = {}; $('#ge-g', m).value.split(',').map(function (x) { return x.trim(); }).filter(Boolean).forEach(function (x) { var mm = /^(.*\S)\s+([0-9.]+)\s*%?$/.exec(x); if (mm) groups2[mm[1]] = Number(mm[2]); else errs.push('Group weights: write them like "Calls 40, Chat 10".'); });
+      var groups2 = {}; $('#ge-g', m).value.split(',').map(function (x) { return x.trim(); }).filter(Boolean).forEach(function (x) { var mm = /^(.*\S)\s+([0-9.]+)\s*%?$/.exec(x); if (mm) groups2[mm[1]] = Number(mm[2]); else errs.push('Group weights: write them like "Performance 50".'); });
       var total = kpis.filter(function (k) { return !k.group; }).reduce(function (a, k) { return a + k.weight; }, 0) + Object.keys(groups2).reduce(function (a, gk) { return a + groups2[gk]; }, 0);
+      var raw = kpis.map(function (k) { return { key: k.key, label: k.label + (k.format === 'pct' ? ' %' : ''), type: k.format === 'time' ? 'time' : k.format === 'pct' ? 'pct' : 'num' }; });
       return { def: { raw: raw, kpis: kpis, groups: groups2 }, errs: errs, total: total };
     }
     function sumLine() { var c2 = collect(); $('#ge-sum', m).textContent = 'Weights total ' + C.round(c2.total, 2) + '%' + (Math.abs(c2.total - 100) > 0.01 ? ' (must be 100%)' : ''); }
-    m.addEventListener('input', sumLine); sumLine();
+    m.addEventListener('input', sumLine); m.addEventListener('change', sumLine); sumLine();
     $('#ge-save', m).onclick = function () {
       var c2 = collect(); if (c2.errs.length) { $('#ge-err', m).innerHTML = '<div class="note bad" style="margin-top:10px">' + c2.errs.map(esc).join('<br>') + '</div>'; return; }
       var rec = { CampaignID: $('#ge-c', m).value, Name: $('#ge-n', m).value, Shift: $('#ge-s', m).value, Profile: $('#ge-p', m).value, EffectiveFrom: $('#ge-m', m).value, Active: $('#ge-a', m).checked, Definition: c2.def };
       if (g && !asNewVersion) rec.GuideID = g.GuideID;
       var btn = this; busy(btn, true);
-      Api.write('saveGuide', { record: rec, expectedVersion: g && !asNewVersion ? g.RecordVersion : undefined }, 'Score guide').then(function () { closeModal(true); render(); toast('Score guide saved. Months from ' + monthLabel(rec.EffectiveFrom) + ' are graded with it when their numbers are next saved.', 'ok', 7000); },
+      Api.write('saveGuide', { record: rec, expectedVersion: g && !asNewVersion ? g.RecordVersion : undefined }, 'Score guide').then(function () { closeModal(true); render(); toast('Score guide saved.', 'ok'); },
         function (e) { busy(btn, false); var fl = e && e.details && e.details.fields; if (fl && fl.Definition) $('#ge-err', m).innerHTML = '<div class="note bad" style="margin-top:10px">' + esc(fl.Definition) + '</div>'; if (!showFieldErrors(m, e, 'ge-e-')) writeError(e); });
     };
   }
   ACT.editGuide = function (el) { guideEditor(el && el.dataset.id ? S.idx.guides[el.dataset.id] : null, false); };
   ACT.copyGuide = function (el) { guideEditor(S.idx.guides[el.dataset.id], true); };
-  ACT.geAddRaw = function (el) { var m = el.closest('.modal-backdrop'); if (m && m._addRaw) m._addRaw(); };
   ACT.geAddKpi = function (el) { var m = el.closest('.modal-backdrop'); if (m && m._addKpi) m._addKpi(); };
   ACT.geDel = function (el) { var tr = el.closest('tr'); if (tr && tr.parentNode.children.length > 1) tr.remove(); };
 

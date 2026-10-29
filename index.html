@@ -513,6 +513,13 @@ button.kpi{border:0;text-align:left;font:inherit;color:inherit;cursor:pointer;ba
 .fu-box{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;margin-top:14px;background:var(--surface-2)}
 .linkish{border:0;background:none;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-align:left;text-decoration:underline}
 .thread{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:8px} .thread li{border-radius:10px;padding:8px 12px;background:var(--surface-2);border:1px solid var(--line-2)} .thread li.answer{background:var(--accent-soft);border-color:transparent;margin-left:28px}
+.sla-box{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;margin-bottom:12px} .sla-box.bad{border-color:var(--bad);background:var(--bad-soft)}
+.rp{background:#fff;color:#111;border:1px solid var(--line);border-radius:12px;padding:22px 26px;max-width:1000px;margin:0 auto;font-size:13px}
+.rp-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1F3354;padding-bottom:8px;margin-bottom:12px} .rp-head h1{margin:2px 0 0;font-size:20px;color:#1F3354} .rp-org{font-size:12px;color:#555} .rp-meta{text-align:right;font-size:12px;color:#333} .rp-meta b{font-size:14px;color:#111}
+.rp-sec{margin:0 0 12px;break-inside:avoid} .rp-sec h2{font-size:14px;margin:0 0 6px;color:#1F3354;text-transform:uppercase;letter-spacing:.03em} .rp-sec h3{font-size:12px;margin:6px 0 2px;color:#333} .rp-sec p{margin:0 0 4px} .rp-sec ul,.rp-sec ol{margin:0;padding-left:18px}
+.rp-t{width:100%;border-collapse:collapse} .rp-t th,.rp-t td{border-bottom:1px solid #E3E8EF;padding:4px 6px;text-align:left} .rp-t th{font-size:11.5px;color:#555;font-weight:600;background:#F6F8FA} .rp-t .num{text-align:right}
+.rp-2{display:grid;grid-template-columns:1fr 1fr;gap:16px} .rp-foot{margin-top:10px;font-size:11px;color:#666;border-top:1px solid #E3E8EF;padding-top:6px}
+@media print{html,body,.shell,.main,.content,.content-inner{background:#fff!important} .no-print{display:none!important} .rp{border:0;padding:0;max-width:none;font-size:9pt;line-height:1.3} .rp-head{padding-bottom:5px;margin-bottom:7px} .rp-head h1{font-size:15pt} .rp-sec{margin:0 0 7px} .rp-sec h2{font-size:10pt;margin:0 0 3px} .rp-sec h3{font-size:8.5pt;margin:3px 0 1px} .rp-t th,.rp-t td{padding:2px 5px} .rp-t th{font-size:8pt} .rp-2{gap:12px} .rp-foot{margin-top:5px;font-size:7.5pt} .content,.content-inner{padding:0!important} .rp .g-bad{color:#B42318!important} .rp .g-warn{color:#9A5B00!important} *{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 /* ---------- responsive ---------- */
 @media (max-width:1180px){
   .kpi-strip{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -663,8 +670,14 @@ var AGSCore = (function () {
   var DEFAULT_SETTINGS = {
     Timezone: ['Asia/Manila', 'IANA timezone used for "today" and display.'],
     Environment: ['PROTOTYPE', 'PROTOTYPE or PRODUCTION. Destructive synthetic-data functions refuse to run in PRODUCTION.'],
-    IRPendingDays: ['7', 'An IR pending longer than this many days is flagged on the overview.'],
-    GrievanceDays: ['14', 'A grievance open longer than this many days is flagged on the overview.'],
+    IRPendingDays: ['7', 'SLA: an IR should be issued or waived within this many days of the incident.'],
+    GrievanceAckDays: ['2', 'SLA: a grievance should get its first update (acknowledged) within this many days.'],
+    GrievanceDays: ['14', 'SLA: a grievance should be resolved or closed within this many days.'],
+    IssueResolveDays: ['10', 'SLA: a client issue with no due date should be resolved within this many days.'],
+    SlaCriticalUpdateDays: ['1', 'SLA: Critical escalation, first update within (days).'], SlaCriticalResolveDays: ['3', 'SLA: Critical escalation, resolved within (days).'],
+    SlaHighUpdateDays: ['1', 'SLA: High escalation, first update within (days).'], SlaHighResolveDays: ['5', 'SLA: High escalation, resolved within (days).'],
+    SlaMediumUpdateDays: ['2', 'SLA: Medium escalation, first update within (days).'], SlaMediumResolveDays: ['7', 'SLA: Medium escalation, resolved within (days).'],
+    SlaLowUpdateDays: ['3', 'SLA: Low escalation, first update within (days).'], SlaLowResolveDays: ['14', 'SLA: Low escalation, resolved within (days).'],
     EscalationStaleDays: ['3', 'An open escalation with no update for this many days is flagged.'],
     FollowUpDays: ['3', 'Default number of days to answer a follow-up request.'],
     AppUrl: ['', 'The address of this app (e.g. https://agsopshub.vercel.app). Used for links in emails.'],
@@ -888,7 +901,38 @@ var AGSCore = (function () {
   function dateOf(entity, r) { return { issues: r.RaisedDate, escalations: r.EscalationDate, irs: r.IncidentDate, grievances: r.ReceivedDate }[entity] || ''; }
   function daysOpen(entity, r, today) { var d = dateOf(entity, r); return isIsoDate(d) ? Math.max(0, diffDays(today, d)) : null; }
   function lastUpdate(r) { var u = arr(r.Updates); var t = u.length ? s(u[u.length - 1].at).slice(0, 10) : ''; return t || s(r.UpdatedAt).slice(0, 10); }
-  function overdue(r, today) { return isIsoDate(r.DueDate) && r.DueDate < today && isOpen('issues', r); }
+  // ---------- SLAs: time targets per log (and per severity for escalations), from AppSettings ----------
+  // Resolve target: issues = their due date, or raised + IssueResolveDays; escalations = per severity; IRs = issued or
+  // waived within IRPendingDays; grievances = GrievanceDays. First-update target: escalations per severity; grievances
+  // GrievanceAckDays. Closing the item also counts as the first response. All targets are in calendar days.
+  function slaSettings(st) { var o = {}; Object.keys(DEFAULT_SETTINGS).forEach(function (k) { o[k] = DEFAULT_SETTINGS[k][0]; }); Object.keys(st || {}).forEach(function (k) { if (s(st[k]) !== '') o[k] = st[k]; }); return o; }
+  function slaInfo(entity, r, today, st) {
+    st = slaSettings(st); var start = dateOf(entity, r), upd = null, res = null, num = function (k) { var x = parseInt(st[k], 10); return isFinite(x) ? x : null; };
+    if (!isIsoDate(start)) return null;
+    if (entity === 'escalations') { var sv = s(r.Severity) || 'Medium'; upd = num('Sla' + sv + 'UpdateDays'); res = num('Sla' + sv + 'ResolveDays'); }
+    if (entity === 'issues') res = num('IssueResolveDays');
+    if (entity === 'irs') res = num('IRPendingDays');
+    if (entity === 'grievances') { upd = num('GrievanceAckDays'); res = num('GrievanceDays'); }
+    var resolveDue = entity === 'issues' && isIsoDate(r.DueDate) ? r.DueDate : (res === null ? null : addDays(start, res)), updateDue = upd === null ? null : addDays(start, upd);
+    var ups = arr(r.Updates), firstUp = ups.length > 1 ? s(ups[1].at).slice(0, 10) : null, open = isOpen(entity, r);
+    var closedOn = open ? null : (s(r.ResolvedDate) || s(r.IssuedDate) || lastUpdate(r) || today);
+    var resolveMet = closedOn && resolveDue ? closedOn <= resolveDue : null;
+    var firstResp = firstUp || closedOn, updateMet = updateDue ? (firstResp ? firstResp <= updateDue : null) : null;
+    var breaches = [];
+    if (open && resolveDue && today > resolveDue) breaches.push({ kind: 'resolve', due: resolveDue, late: diffDays(today, resolveDue) });
+    if (open && updateDue && !firstUp && today > updateDue) breaches.push({ kind: 'update', due: updateDue, late: diffDays(today, updateDue) });
+    var status = !open ? (resolveMet === false || updateMet === false ? 'missed' : 'met') : breaches.length ? 'breached' : ((resolveDue && diffDays(resolveDue, today) <= 1) || (updateDue && !firstUp && diffDays(updateDue, today) <= 0) ? 'due-soon' : 'on-track');
+    return { resolveDue: resolveDue, updateDue: updateDue, firstUpdate: firstUp, closedOn: closedOn, resolveMet: resolveMet, updateMet: updateMet, breaches: breaches, status: status };
+  }
+  function slaBreached(entity, r, today, st) { var x = slaInfo(entity, r, today, st); return !!x && x.status === 'breached'; }
+  function overdue(r, today, st) { return isOpen('issues', r) && slaBreached('issues', r, today, st); }
+  // Share of items closed in a month that were resolved within target.
+  function slaMonth(data, entity, month, today, st, campaignId) {
+    var closed = (data[entity] || []).filter(function (r) { if (!live(r) || isOpen(entity, r) || (campaignId && r.CampaignID !== campaignId)) return false; var x = slaInfo(entity, r, today, st); return x && s(x.closedOn).slice(0, 7) === month; });
+    var met = closed.filter(function (r) { var x = slaInfo(entity, r, today, st); return x.resolveMet !== false && x.updateMet !== false; }).length;
+    var breachedNow = (data[entity] || []).filter(function (r) { return live(r) && (!campaignId || r.CampaignID === campaignId) && slaBreached(entity, r, today, st); }).length;
+    return { closed: closed.length, met: met, rate: closed.length ? met / closed.length * 100 : null, breachedNow: breachedNow };
+  }
 
   // ---------- KPIs ----------
   function kpiCampaign(data, campaignId, month) {
@@ -907,14 +951,15 @@ var AGSCore = (function () {
   }
 
   // ---------- logs ----------
-  function logSummary(data, entity, month, today, campaignId) {
+  function logSummary(data, entity, month, today, campaignId, st) {
     var list = (data[entity] || []).filter(function (r) { return live(r) && (!campaignId || r.CampaignID === campaignId); });
     var inMonth = function (r) { return s(dateOf(entity, r)).slice(0, 7) === month; };
     var open = list.filter(function (r) { return isOpen(entity, r); });
     var oldest = open.reduce(function (m, r) { var d = daysOpen(entity, r, today); return d !== null && d > m ? d : m; }, -1);
     var closedInMonth = list.filter(function (r) { return !isOpen(entity, r) && s(r.ResolvedDate || r.IssuedDate || s(r.UpdatedAt).slice(0, 10)).slice(0, 7) === month; }).length;
     var o = { newCount: list.filter(inMonth).length, open: open.length, closed: closedInMonth, oldest: oldest < 0 ? null : oldest };
-    if (entity === 'issues') o.overdue = open.filter(function (r) { return overdue(r, today); }).length;
+    o.breached = open.filter(function (r) { return slaBreached(entity, r, today, st); }).length; o.sla = slaMonth(data, entity, month, today, st, campaignId);
+    if (entity === 'issues') o.overdue = o.breached;
     if (entity === 'escalations') o.critical = open.filter(function (r) { return r.Severity === 'Critical'; }).length;
     if (entity === 'irs') { var m = list.filter(inMonth); o.monthTotal = m.length; o.pending = m.filter(function (r) { return r.Status === 'Pending'; }).length; o.issued = m.filter(function (r) { return r.Status === 'Issued'; }).length; o.waived = m.filter(function (r) { return r.Status === 'Waived'; }).length; o.pendingAll = open.length; }
     return o;
@@ -937,7 +982,7 @@ var AGSCore = (function () {
   }
 
   // ---------- accountability ----------
-  function accountManagers(data, month, today) {
+  function accountManagers(data, month, today, st) {
     var users = byKey(data.users || [], 'UserID'), map = {};
     (data.campaigns || []).filter(live).forEach(function (c) { splitIds(c.AccountManagerIDs).forEach(function (uid) { (map[uid] = map[uid] || []).push(c.CampaignID); }); });
     return Object.keys(map).map(function (uid) {
@@ -945,7 +990,8 @@ var AGSCore = (function () {
       var kp = cids.map(function (c) { return kpiCampaign(data, c, month); }).filter(Boolean), agents = kp.reduce(function (a, k) { return a + k.agents; }, 0);
       var issues = (data.issues || []).filter(function (r) { return inC(r) && isOpen('issues', r); });
       return { userId: uid, name: (users[uid] || {}).DisplayName || uid, campaignIds: cids, total: agents ? round(kp.reduce(function (a, k) { return a + k.total * k.agents; }, 0) / agents, 2) : null,
-        issues: issues.length, overdue: issues.filter(function (r) { return overdue(r, today); }).length,
+        issues: issues.length, overdue: issues.filter(function (r) { return overdue(r, today, st); }).length,
+        breaches: LOGS.reduce(function (a, e) { return a + (data[e] || []).filter(function (r) { return inC(r) && slaBreached(e, r, today, st); }).length; }, 0),
         escalations: (data.escalations || []).filter(function (r) { return inC(r) && isOpen('escalations', r); }).length,
         irs: (data.irs || []).filter(function (r) { return inC(r) && r.Status === 'Pending'; }).length,
         grievances: (data.grievances || []).filter(function (r) { return inC(r) && isOpen('grievances', r); }).length };
@@ -967,19 +1013,41 @@ var AGSCore = (function () {
   // ---------- needs attention ----------
   function needsAttention(data, month, today, settings, campaignId) {
     var st = settings || {}, out = [], inC = function (r) { return live(r) && (!campaignId || r.CampaignID === campaignId); };
-    var irDays = +st.IRPendingDays || 7, grDays = +st.GrievanceDays || 14, escDays = +st.EscalationStaleDays || 3;
+    var escDays = +st.EscalationStaleDays || 3, lbl = { resolve: 'resolution', update: 'first update' };
+    function breachMeta(entity, r) { var x = slaInfo(entity, r, today, st); return x.breaches.map(function (bb) { return lbl[bb.kind] + ' was due ' + bb.due + ' (' + bb.late + ' day' + (bb.late === 1 ? '' : 's') + ' late)'; }).join(' · '); }
     (data.escalations || []).filter(function (r) { return inC(r) && isOpen('escalations', r); }).forEach(function (r) {
-      var stale = diffDays(today, lastUpdate(r));
-      if (r.Severity === 'Critical' || r.Severity === 'High' || stale >= escDays) out.push({ entity: 'escalations', id: r.EscalationID, level: r.Severity === 'Critical' ? 3 : 2, kind: 'Escalation', title: r.Severity + ' · ' + r.Title, campaignId: r.CampaignID, meta: 'Opened ' + r.EscalationDate + (stale >= escDays ? ' · no update for ' + stale + ' days' : '') });
+      var br = slaBreached('escalations', r, today, st), stale = diffDays(today, lastUpdate(r));
+      if (br || r.Severity === 'Critical' || stale >= escDays) out.push({ entity: 'escalations', id: r.EscalationID, level: br || r.Severity === 'Critical' ? 3 : 2, kind: br ? 'SLA breach' : 'Escalation', title: r.Severity + ' escalation · ' + r.Title, campaignId: r.CampaignID, meta: br ? breachMeta('escalations', r) : 'Opened ' + r.EscalationDate + (stale >= escDays ? ' · no update for ' + stale + ' days' : '') });
     });
-    (data.issues || []).filter(function (r) { return inC(r) && overdue(r, today); }).forEach(function (r) { out.push({ entity: 'issues', id: r.IssueID, level: 3, kind: 'Client issue', title: r.Title, campaignId: r.CampaignID, meta: 'Overdue since ' + r.DueDate + ' · ' + daysOpen('issues', r, today) + ' days open' }); });
-    var oldIr = (data.irs || []).filter(function (r) { return inC(r) && r.Status === 'Pending' && daysOpen('irs', r, today) > irDays; });
-    if (oldIr.length) out.push({ entity: 'irs', id: '', level: 2, kind: 'IR', title: oldIr.length + ' IR' + (oldIr.length === 1 ? '' : 's') + ' pending for more than ' + irDays + ' days', campaignId: '', meta: 'Oldest: ' + oldIr.reduce(function (m, r) { return Math.max(m, daysOpen('irs', r, today)); }, 0) + ' days' });
-    var oldGr = (data.grievances || []).filter(function (r) { return inC(r) && isOpen('grievances', r) && daysOpen('grievances', r, today) > grDays; });
-    if (oldGr.length) out.push({ entity: 'grievances', id: '', level: 2, kind: 'Grievance', title: oldGr.length + ' grievance' + (oldGr.length === 1 ? '' : 's') + ' open for more than ' + grDays + ' days', campaignId: '', meta: 'Categories: ' + oldGr.map(function (r) { return r.Category; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') });
+    (data.issues || []).filter(function (r) { return inC(r) && overdue(r, today, st); }).forEach(function (r) { out.push({ entity: 'issues', id: r.IssueID, level: 3, kind: 'SLA breach', title: 'Client issue · ' + r.Title, campaignId: r.CampaignID, meta: breachMeta('issues', r) + ' · ' + daysOpen('issues', r, today) + ' days open' }); });
+    var oldIr = (data.irs || []).filter(function (r) { return inC(r) && slaBreached('irs', r, today, st); });
+    if (oldIr.length) out.push({ entity: 'irs', id: '', level: 2, kind: 'SLA breach', title: oldIr.length + ' IR' + (oldIr.length === 1 ? '' : 's') + ' not issued or waived within ' + slaSettings(st).IRPendingDays + ' days', campaignId: '', meta: 'Oldest: ' + oldIr.reduce(function (m, r) { return Math.max(m, daysOpen('irs', r, today)); }, 0) + ' days' });
+    var oldGr = (data.grievances || []).filter(function (r) { return inC(r) && slaBreached('grievances', r, today, st); });
+    if (oldGr.length) out.push({ entity: 'grievances', id: '', level: 2, kind: 'SLA breach', title: oldGr.length + ' grievance' + (oldGr.length === 1 ? '' : 's') + ' past the acknowledgement or resolution target', campaignId: '', meta: 'Categories: ' + oldGr.map(function (r) { return r.Category; }).filter(function (v, i2, a2) { return a2.indexOf(v) === i2; }).join(', ') });
     (data.followUps || []).filter(function (r) { return inC(r) && fuOverdue(r, today); }).forEach(function (r) { out.push({ entity: 'followUps', id: r.FollowUpID, level: 3, kind: 'Follow-up', title: 'No answer yet: ' + r.Question.slice(0, 90), campaignId: r.CampaignID, meta: 'Due ' + r.DueDate + ' · about ' + r.Title }); });
     kpiOverview(data, month, campaignId).forEach(function (k) { if (k.delta !== null && k.delta <= -0.25) out.push({ entity: 'kpi', id: k.campaignId, level: 2, kind: 'KPI', title: k.name + ' Total Grade down ' + Math.abs(k.delta).toFixed(2), campaignId: k.campaignId, meta: 'From ' + k.prev.total.toFixed(2) + ' to ' + k.cur.total.toFixed(2) + ' vs last month' }); });
     return out.sort(function (a, c) { return c.level - a.level; });
+  }
+
+  // ---------- the monthly report (one page per month, for the site or one campaign) ----------
+  function onlyCampaign(data, cid) { var o = {}; Object.keys(data).forEach(function (k) { var v = data[k]; o[k] = Array.isArray(v) && k !== 'users' && k !== 'kpiGuides' ? v.filter(function (r) { return r.CampaignID === cid; }) : v; }); return o; }
+  function monthlyReport(data, month, today, st, campaignId) {
+    var inC = function (r) { return live(r) && (!campaignId || r.CampaignID === campaignId); }, inM = function (e, r) { return s(dateOf(e, r)).slice(0, 7) === month; };
+    var logs = {}; LOGS.forEach(function (e) {
+      var list = (data[e] || []).filter(inC), m = list.filter(function (r) { return inM(e, r); }), sl = slaMonth(data, e, month, today, st, campaignId);
+      logs[e] = { newCount: m.length, closed: sl.closed, slaRate: sl.rate, openNow: list.filter(function (r) { return isOpen(e, r); }).length, breachedNow: sl.breachedNow };
+    });
+    var count = function (list, key) { var o = {}; list.forEach(function (r) { var k = r[key] || 'Not set'; o[k] = (o[k] || 0) + 1; }); return Object.keys(o).map(function (k) { return { label: k, n: o[k] }; }).sort(function (a, b) { return b.n - a.n; }); };
+    var escM = (data.escalations || []).filter(function (r) { return inC(r) && inM('escalations', r); }), irM = (data.irs || []).filter(function (r) { return inC(r) && inM('irs', r); }), grM = (data.grievances || []).filter(function (r) { return inC(r) && inM('grievances', r); });
+    var causes = (data.escalations || []).filter(function (r) { return inC(r) && !isOpen('escalations', r) && s(r.ResolvedDate).slice(0, 7) === month && r.RootCause; });
+    var kp = kpiOverview(data, month, campaignId), people = [];
+    if (campaignId) people = (data.kpiRows || []).filter(function (r) { return live(r) && r.CampaignID === campaignId && r.Month === month && n(r.TotalGrade) !== null; }).map(function (r) { var a = (data.agents || []).filter(function (x) { return x.AgentID === r.AgentID; })[0] || {}; return { name: a.FullName || r.AgentID, total: n(r.TotalGrade) }; }).sort(function (a, b) { return b.total - a.total; });
+    var fu = (data.followUps || []).filter(function (r) { return inC(r) && s(r.CreatedAt).slice(0, 7) === month; });
+    var fuOnTime = fu.filter(function (r) { var ans = arr(r.Thread).filter(function (x) { return x.kind === 'answer'; })[0]; return ans && s(ans.at).slice(0, 10) <= r.DueDate; }).length;
+    return { month: month, campaignId: campaignId || '', kpis: kp, top: people.slice(0, 5), bottom: people.slice(Math.max(5, people.length - 5)).reverse(), logs: logs,
+      escalationsBySeverity: count(escM, 'Severity'), rootCauses: count(causes, 'RootCause'), irsByType: count(irM, 'Type'), irsByStatus: count(irM, 'Status'), grievancesByCategory: count(grM, 'Category'),
+      attrition: attrition(data, month, campaignId), accountManagers: accountManagers(campaignId ? onlyCampaign(data, campaignId) : data, month, today, st),
+      followUps: { asked: fu.length, answeredOnTime: fuOnTime }, attention: needsAttention(data, month, today, st, campaignId).slice(0, 8) };
   }
 
   // ---------- the Monday summary email (built here so it can be tested; sent only by the server) ----------
@@ -989,7 +1057,7 @@ var AGSCore = (function () {
     (data.kpiRows || []).forEach(function (r) { if (live(r) && r.Month > month) month = r.Month; }); month = month || today.slice(0, 7);
     var cname = function (cid) { var c = (data.campaigns || []).filter(function (x) { return x.CampaignID === cid; })[0]; return c ? c.Name : cid; };
     var since = addDays(today, -7), L = {};
-    LOGS.forEach(function (e) { L[e] = logSummary(data, e, today.slice(0, 7), today); L[e].week = (data[e] || []).filter(function (r) { return live(r) && dateOf(e, r) >= since; }).length; });
+    LOGS.forEach(function (e) { L[e] = logSummary(data, e, today.slice(0, 7), today, '', settings); L[e].week = (data[e] || []).filter(function (r) { return live(r) && dateOf(e, r) >= since; }).length; });
     var needs = needsAttention(data, today.slice(0, 7), today, settings), kp = kpiOverview(data, month).filter(function (k) { return k.cur; });
     var fu = (data.followUps || []).filter(live), waiting = fu.filter(function (r) { return r.Status === 'Waiting'; }), answered = fu.filter(function (r) { return r.Status === 'Answered'; });
     var cell = 'padding:6px 10px;border-bottom:1px solid #E3E8EF;font-size:13px', th = cell + ';text-align:left;color:#5E6B80;font-weight:600;background:#F6F8FA';
@@ -999,8 +1067,8 @@ var AGSCore = (function () {
       '<h3 style="margin:16px 0 6px;font-size:15px">Needs attention (' + needs.length + ')</h3>' +
       (needs.length ? '<ul style="margin:0;padding-left:18px;font-size:13px">' + needs.slice(0, 12).map(function (x) { return '<li style="margin:3px 0"><b>' + htmlEsc(x.kind) + ':</b> ' + htmlEsc(x.title) + (x.campaignId ? ' <span style="color:#5E6B80">(' + htmlEsc(cname(x.campaignId)) + ', accountable: ' + htmlEsc(accountableNames(data, x.campaignId).join(', ') || 'not assigned') + ')</span>' : '') + '</li>'; }).join('') + (needs.length > 12 ? '<li>…and ' + (needs.length - 12) + ' more in the app</li>' : '') + '</ul>' : '<p style="font-size:13px;margin:0">Nothing overdue or critical.</p>') +
       '<h3 style="margin:16px 0 6px;font-size:15px">Your follow-ups</h3><p style="font-size:13px;margin:0">' + waiting.length + ' waiting for an answer' + (waiting.filter(function (r) { return fuOverdue(r, today); }).length ? ' (' + waiting.filter(function (r) { return fuOverdue(r, today); }).length + ' overdue)' : '') + ' · ' + answered.length + ' answered and ready for you to review · ' + link('followups', 'see follow-ups') + '</p>' +
-      '<h3 style="margin:16px 0 6px;font-size:15px">Logs</h3><table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Log</th><th style="' + th + '">New this week</th><th style="' + th + '">Open now</th><th style="' + th + '">Oldest open</th></tr>' +
-      [['issues', 'Client issues'], ['escalations', 'Client escalations'], ['irs', 'IR log'], ['grievances', 'Agent grievances']].map(function (x) { var l = L[x[0]]; return '<tr><td style="' + cell + '">' + link(x[0], x[1]) + '</td><td style="' + cell + '">' + l.week + '</td><td style="' + cell + '">' + l.open + (x[0] === 'issues' && l.overdue ? ' (' + l.overdue + ' overdue)' : '') + (x[0] === 'escalations' && l.critical ? ' (' + l.critical + ' critical)' : '') + '</td><td style="' + cell + '">' + (l.oldest === null ? '—' : l.oldest + ' days') + '</td></tr>'; }).join('') + '</table>' +
+      '<h3 style="margin:16px 0 6px;font-size:15px">Logs</h3><table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Log</th><th style="' + th + '">New this week</th><th style="' + th + '">Open now</th><th style="' + th + '">Past SLA</th><th style="' + th + '">Oldest open</th></tr>' +
+      [['issues', 'Client issues'], ['escalations', 'Client escalations'], ['irs', 'IR log'], ['grievances', 'Agent grievances']].map(function (x) { var l = L[x[0]]; return '<tr><td style="' + cell + '">' + link(x[0], x[1]) + '</td><td style="' + cell + '">' + l.week + '</td><td style="' + cell + '">' + l.open + (x[0] === 'escalations' && l.critical ? ' (' + l.critical + ' critical)' : '') + '</td><td style="' + cell + (l.breached ? ';color:#B42318;font-weight:bold' : '') + '">' + l.breached + '</td><td style="' + cell + '">' + (l.oldest === null ? '—' : l.oldest + ' days') + '</td></tr>'; }).join('') + '</table>' +
       '<h3 style="margin:16px 0 6px;font-size:15px">KPIs · ' + htmlEsc(month) + '</h3>' + (kp.length ? '<table style="border-collapse:collapse;width:100%"><tr><th style="' + th + '">Campaign</th><th style="' + th + '">Total Grade</th><th style="' + th + '">vs previous month</th></tr>' +
         kp.map(function (k) { return '<tr><td style="' + cell + '">' + htmlEsc(k.name) + '</td><td style="' + cell + '"><b>' + k.cur.total.toFixed(2) + '</b></td><td style="' + cell + ';color:' + (k.delta === null ? '#5E6B80' : k.delta < 0 ? '#B42318' : '#166534') + '">' + (k.delta === null ? '—' : (k.delta > 0 ? '+' : '') + k.delta.toFixed(2)) + '</td></tr>'; }).join('') + '</table>' : '<p style="font-size:13px;margin:0">No KPI results yet.</p>') +
       '<p style="margin:18px 0 0;font-size:12px;color:#5E6B80">Sent automatically every Monday by the AGS Operations Hub. Figures as of ' + htmlEsc(today) + '.</p></div>';
@@ -1331,14 +1399,19 @@ var AGSCore = (function () {
       }
     });
   } };
+  var SLA_RULE = function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; };
   var SETTING_RULES = {
     Timezone: function (v) { return /^(UTC|[A-Za-z]+(\/[A-Za-z0-9_+\-]+){1,2})$/.test(v) ? '' : 'Enter an IANA timezone such as Asia/Manila.'; },
     Environment: function (v) { return v === 'PROTOTYPE' || v === 'PRODUCTION' ? '' : 'Use PROTOTYPE or PRODUCTION.'; },
     IRPendingDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
     GrievanceDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
+    GrievanceAckDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
+    IssueResolveDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
     EscalationStaleDays: function (v) { return /^\d{1,3}$/.test(v) ? '' : 'Enter a whole number of days.'; },
     FollowUpDays: function (v) { return /^\d{1,2}$/.test(v) ? '' : 'Enter a whole number of days.'; },
     AppUrl: function (v) { return !v || /^https:\/\/[^\s"<>]+$/.test(v) ? '' : 'Enter the full address, starting with https://'; },
+    SlaCriticalUpdateDays: SLA_RULE, SlaCriticalResolveDays: SLA_RULE, SlaHighUpdateDays: SLA_RULE, SlaHighResolveDays: SLA_RULE,
+    SlaMediumUpdateDays: SLA_RULE, SlaMediumResolveDays: SLA_RULE, SlaLowUpdateDays: SLA_RULE, SlaLowResolveDays: SLA_RULE,
     WeeklySummaryTo: function (v) { return !v || v.split(',').every(function (x) { return isEmail(x.trim()); }) ? '' : 'Enter email addresses separated by commas.'; }
   };
   H.saveSettings = { write: true, admin: true, fn: function (ctx, p) {
@@ -1539,7 +1612,7 @@ var AGSCore = (function () {
 
   return {
     CORE_VERSION: CORE_VERSION, APP_NAME: APP_NAME, ROLES: ROLES, ROLE_LABELS: ROLE_LABELS, ASSIGNABLE_ROLES: ASSIGNABLE_ROLES, CAMPAIGN_ROLES: CAMPAIGN_ROLES,
-    LISTS: LISTS, CLOSED: CLOSED, FOLLOWUP_STATUS: FOLLOWUP_STATUS, fuOverdue: fuOverdue, followUpsFor: followUpsFor, weeklySummary: weeklySummary, htmlEsc: htmlEsc, SCHEMA: SCHEMA, META: META, ENTITIES: ENTITIES, DATA_ENTITIES: DATA_ENTITIES, LOGS: LOGS, DEFAULT_SETTINGS: DEFAULT_SETTINGS, FIELDS: FIELDS,
+    LISTS: LISTS, CLOSED: CLOSED, slaInfo: slaInfo, slaBreached: slaBreached, slaMonth: slaMonth, slaSettings: slaSettings, monthlyReport: monthlyReport, FOLLOWUP_STATUS: FOLLOWUP_STATUS, fuOverdue: fuOverdue, followUpsFor: followUpsFor, weeklySummary: weeklySummary, htmlEsc: htmlEsc, SCHEMA: SCHEMA, META: META, ENTITIES: ENTITIES, DATA_ENTITIES: DATA_ENTITIES, LOGS: LOGS, DEFAULT_SETTINGS: DEFAULT_SETTINGS, FIELDS: FIELDS,
     CAMPAIGN_NAMES: CAMPAIGN_NAMES, startingGuides: startingGuides,
     AgsError: AgsError, s: s, n: n, b: b, isIsoDate: isIsoDate, addDays: addDays, diffDays: diffDays, json: json, arr: arr, rate: rate, fmtRate: fmtRate, round: round, clone: clone,
     isEmail: isEmail, live: live, blank: blank, byKey: byKey, splitIds: splitIds, settingsWithDefaults: settingsWithDefaults, normRole: normRole, periodOf: periodOf, daysInMonth: daysInMonth,
@@ -2160,9 +2233,9 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   CHG.gMonth = function (el) { S.g.month = el.value; render(); };
   // ================= shell =================
   var NAV = [['dashboard', 'Overview', 'dashboard'], ['kpis', 'KPIs', 'analytics'], ['issues', 'Client issues', 'followups'], ['escalations', 'Client escalations', 'sessions'],
-    ['irs', 'IR log', 'reports'], ['attrition', 'Attrition', 'agents'], ['grievances', 'Agent grievances', 'templates', 'grievances'], ['followups', 'Follow-ups', 'bell'], ['settings', 'Settings', 'settings', 'viewSettings']];
-  var TITLES = { dashboard: 'Overview', kpis: 'KPIs', issues: 'Client issues', escalations: 'Client escalations', irs: 'IR log', attrition: 'Attrition', grievances: 'Agent grievances', followups: 'Follow-ups', settings: 'Settings' };
-  var MONTH_PAGES = { dashboard: 1, kpis: 1, attrition: 1, issues: 1, escalations: 1, irs: 1, grievances: 1 };
+    ['irs', 'IR log', 'reports'], ['attrition', 'Attrition', 'agents'], ['grievances', 'Agent grievances', 'templates', 'grievances'], ['followups', 'Follow-ups', 'bell'], ['report', 'Monthly report', 'reports'], ['settings', 'Settings', 'settings', 'viewSettings']];
+  var TITLES = { dashboard: 'Overview', kpis: 'KPIs', issues: 'Client issues', escalations: 'Client escalations', irs: 'IR log', attrition: 'Attrition', grievances: 'Agent grievances', followups: 'Follow-ups', report: 'Monthly report', settings: 'Settings' };
+  var MONTH_PAGES = { dashboard: 1, kpis: 1, attrition: 1, issues: 1, escalations: 1, irs: 1, grievances: 1, report: 1 };
   function navList() { return NAV.filter(function (n) { return !n[3] || cap(n[3]); }); }
   function monthOptions() {
     var cur = S.today.slice(0, 7), list = [], m = (+cur.slice(0, 4) - 1) + '-01';
@@ -2239,13 +2312,13 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var kp = C.kpiOverview(data, month), withKpi = kp.filter(function (k) { return k.cur; });
     var agentsGraded = withKpi.reduce(function (a, k) { return a + k.cur.agents; }, 0), avg = agentsGraded ? withKpi.reduce(function (a, k) { return a + k.cur.total * k.cur.agents; }, 0) / agentsGraded : null;
     var prevAll = kp.filter(function (k) { return k.prev; }), prevN = prevAll.reduce(function (a, k) { return a + k.prev.agents; }, 0), prevAvg = prevN ? prevAll.reduce(function (a, k) { return a + k.prev.total * k.prev.agents; }, 0) / prevN : null;
-    var L = {}; C.LOGS.forEach(function (e) { L[e] = C.logSummary(data, e, month, today); });
+    var L = {}; C.LOGS.forEach(function (e) { L[e] = C.logSummary(data, e, month, today, '', S.settings); });
     var at = C.attrition(data, month, '');
     function tile(label, value, sub, subCls, page) { return '<button class="kpi" data-act="nav" data-page="' + page + '"><span class="k-label">' + esc(label) + '</span><span class="k-value">' + value + '</span><span class="k-sub ' + (subCls || '') + '">' + sub + '</span></button>'; }
     var tiles = '<div class="kpi-strip" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">' +
       tile('KPI · average Total Grade', avg === null ? '—' : avg.toFixed(2), avg !== null && prevAvg !== null ? deltaTxt(C.round(avg - prevAvg, 2)) + ' vs ' + monthLabel(C.monthAdd(month, -1)).split(' ')[0] : 'No KPI results this month', '', 'kpis') +
-      tile('Open client issues', L.issues.open, (L.issues.overdue ? '<span class="g-bad">' + L.issues.overdue + ' overdue</span>' : 'None overdue') + (L.issues.oldest !== null ? ' · oldest ' + L.issues.oldest + ' days' : ''), '', 'issues') +
-      tile('Open client escalations', L.escalations.open, L.escalations.critical ? '<span class="g-bad">' + L.escalations.critical + ' critical</span>' : 'None critical', '', 'escalations') +
+      tile('Open client issues', L.issues.open, (L.issues.overdue ? '<span class="g-bad">' + L.issues.overdue + ' past SLA</span>' : 'None past SLA') + (L.issues.oldest !== null ? ' · oldest ' + L.issues.oldest + ' days' : ''), '', 'issues') +
+      tile('Open client escalations', L.escalations.open, (L.escalations.breached ? '<span class="g-bad">' + L.escalations.breached + ' past SLA</span>' : 'None past SLA') + (L.escalations.critical ? ' · ' + L.escalations.critical + ' critical' : ''), '', 'escalations') +
       tile('IR log · ' + monthLabel(month).split(' ')[0], L.irs.monthTotal, L.irs.pending + ' pending · ' + L.irs.issued + ' issued · ' + L.irs.waived + ' waived', L.irs.pending ? 'g-warn' : '', 'irs') +
       tile('Attrition · ' + monthLabel(month).split(' ')[0], at.current.rate === null ? '—' : at.current.rate.toFixed(1) + '%', at.current.separations + ' separation' + (at.current.separations === 1 ? '' : 's') + ' · YTD ' + (at.ytdRate === null ? '—' : at.ytdRate.toFixed(1) + '%'), '', 'attrition') +
       (cap('grievances') ? tile('Agent grievances', L.grievances.open + ' open', L.grievances.oldest !== null ? 'oldest ' + L.grievances.oldest + ' days' : 'None open', '', 'grievances') : '') + fuTile() + '</div>';
@@ -2263,18 +2336,18 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       (needs.length ? '<ul class="ledger">' + needs.slice(0, 12).map(function (x) {
         return '<li data-sev="' + (x.level >= 3 ? 'High' : 'Medium') + '"><span class="rail"></span><div class="l-body"><div class="l-type">' + pill(x.kind, x.level >= 3 ? 'bad' : 'warn') + ' ' + esc(x.title) + '</div><div class="l-meta">' + esc((x.campaignId ? campName(x.campaignId) + ' · accountable: ' + accountable(x.campaignId) + ' · ' : '') + x.meta) + '</div></div>' +
           '<div class="l-act"><button class="btn btn-sm" data-act="openAttn" data-entity="' + esc(x.entity) + '" data-id="' + esc(x.id) + '">Open</button></div></li>'; }).join('') + '</ul>' : emptyState('Nothing needs attention', 'No overdue issues, critical escalations, long-pending IRs or big KPI drops.')) + '</section>';
-    var ams = C.accountManagers(data, month, today);
+    var ams = C.accountManagers(data, month, today, S.settings);
     var amTable = '<section class="panel"><div class="panel-h"><h2>Account managers</h2><span class="sub">Each campaign\'s issues, escalations, IRs and grievances are accountable to its account manager</span></div>' +
-      (ams.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Account manager</th><th>Campaigns</th><th class="num">Total Grade</th><th class="num">Open issues</th><th class="num">Overdue</th><th class="num">Open escalations</th><th class="num">IRs pending</th>' + (cap('grievances') ? '<th class="num">Open grievances</th>' : '') + '</tr></thead><tbody>' +
+      (ams.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Account manager</th><th>Campaigns</th><th class="num">Total Grade</th><th class="num">Open issues</th><th class="num">Overdue</th><th class="num">Open escalations</th><th class="num">Past SLA</th><th class="num">IRs pending</th>' + (cap('grievances') ? '<th class="num">Open grievances</th>' : '') + '</tr></thead><tbody>' +
         ams.map(function (m) { var shared = m.campaignIds.filter(function (c) { return C.accountableNames(S.data, c).length > 1; });
-          return '<tr><td class="t-title">' + esc(m.name) + '</td><td>' + esc(m.campaignIds.map(campName).join(', ')) + (shared.length ? '<div class="t-sub">shared: ' + esc(shared.map(campName).join(', ')) + '</div>' : '') + '</td><td class="num ' + totalCls(m.total) + '">' + (m.total === null ? '—' : m.total.toFixed(2)) + '</td><td class="num">' + m.issues + '</td><td class="num ' + (m.overdue ? 'g-bad' : '') + '">' + m.overdue + '</td><td class="num">' + m.escalations + '</td><td class="num">' + m.irs + '</td>' + (cap('grievances') ? '<td class="num">' + m.grievances + '</td>' : '') + '</tr>'; }).join('') +
+          return '<tr><td class="t-title">' + esc(m.name) + '</td><td>' + esc(m.campaignIds.map(campName).join(', ')) + (shared.length ? '<div class="t-sub">shared: ' + esc(shared.map(campName).join(', ')) + '</div>' : '') + '</td><td class="num ' + totalCls(m.total) + '">' + (m.total === null ? '—' : m.total.toFixed(2)) + '</td><td class="num">' + m.issues + '</td><td class="num ' + (m.overdue ? 'g-bad' : '') + '">' + m.overdue + '</td><td class="num">' + m.escalations + '</td><td class="num ' + (m.breaches ? 'g-bad' : '') + '">' + m.breaches + '</td><td class="num">' + m.irs + '</td>' + (cap('grievances') ? '<td class="num">' + m.grievances + '</td>' : '') + '</tr>'; }).join('') +
         '</tbody></table></div>' : emptyState('No account managers assigned yet', 'An Admin assigns them in Settings → Campaigns.')) + '</section>';
     var maxRate = Math.max(5, Math.max.apply(null, at.months.map(function (m) { return m.rate || 0; })));
     var attrChart = '<section class="panel"><div class="panel-h"><h2>Attrition by month</h2><span class="sub">Separations ÷ average headcount · YTD ' + (at.ytdRate === null ? '—' : at.ytdRate.toFixed(1) + '%') + ' (' + at.ytdSeparations + ')</span></div><div class="panel-b"><div class="bars" role="img" aria-label="Attrition rate by month">' +
       at.months.map(function (m) { var h = m.rate === null ? 0 : Math.max(2, m.rate / maxRate * 110); return '<div class="bar-col"><span class="bar-v">' + (m.rate === null ? '—' : m.rate.toFixed(1) + '%') + '</span><span class="bar-b' + (m.month === month ? ' on' : '') + '" style="height:' + h + 'px"></span><span class="bar-l">' + MONTH_NAMES[+m.month.slice(5, 7) - 1].slice(0, 3) + '</span></div>'; }).join('') + '</div></div></section>';
-    var logs = '<section class="panel"><div class="panel-h"><h2>Logs</h2><span class="sub">New in ' + esc(monthLabel(month)) + ', and everything still open</span></div><div class="table-wrap"><table class="t"><thead><tr><th>Log</th><th class="num">New this month</th><th class="num">Open now</th><th class="num">Closed this month</th><th>Oldest open</th></tr></thead><tbody>' +
+    var logs = '<section class="panel"><div class="panel-h"><h2>Logs</h2><span class="sub">New in ' + esc(monthLabel(month)) + ', and everything still open</span></div><div class="table-wrap"><table class="t"><thead><tr><th>Log</th><th class="num">New this month</th><th class="num">Open now</th><th class="num">Closed this month</th><th class="num">Within SLA</th><th class="num">Past SLA now</th><th>Oldest open</th></tr></thead><tbody>' +
       [['issues', 'Client issues'], ['escalations', 'Client escalations'], ['irs', 'IR log'], ['grievances', 'Agent grievances']].filter(function (x) { return x[0] !== 'grievances' || cap('grievances'); }).map(function (x) { var l = L[x[0]];
-        return '<tr class="click" tabindex="0" data-act="nav" data-page="' + x[0] + '"><td class="t-title">' + x[1] + '</td><td class="num">' + l.newCount + '</td><td class="num">' + l.open + '</td><td class="num">' + l.closed + '</td><td>' + (l.oldest === null ? '—' : l.oldest + ' days') + '</td></tr>'; }).join('') + '</tbody></table></div></section>';
+        return '<tr class="click" tabindex="0" data-act="nav" data-page="' + x[0] + '"><td class="t-title">' + x[1] + '</td><td class="num">' + l.newCount + '</td><td class="num">' + l.open + '</td><td class="num">' + l.closed + '</td><td class="num">' + (l.sla.rate === null ? '—' : Math.round(l.sla.rate) + '%') + '</td><td class="num ' + (l.breached ? 'g-bad' : '') + '">' + l.breached + '</td><td>' + (l.oldest === null ? '—' : l.oldest + ' days') + '</td></tr>'; }).join('') + '</tbody></table></div></section>';
     return tiles + kpiTable + '<div class="grid g-2" style="margin-top:16px">' + attn + amTable + '</div><div class="grid g-2" style="margin-top:16px">' + attrChart + logs + '</div>' +
       '<p class="small muted" style="margin-top:12px">Every number opens the matching page. KPI results are entered after each month ends, so the month at the top starts on the latest month with results.</p>';
   };
@@ -2427,6 +2500,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     return (S.data[entity] || []).filter(function (r) {
       if (!C.live(r)) return false; if (S.g.campaignId && r.CampaignID !== S.g.campaignId) return false; if (amCamps && amCamps.indexOf(r.CampaignID) < 0) return false;
       if (f.tab === 'open' && !C.isOpen(entity, r)) return false;
+      if (f.tab === 'breached' && !C.slaBreached(entity, r, S.today, S.settings)) return false;
       if (f.tab === 'month' && String(r[cfg.date]).slice(0, 7) !== month) return false;
       if (cfg.statuses.indexOf(f.tab) >= 0 && r.Status !== f.tab) return false;
       if (q && [r.Title, r.Cause, r.Details, r.HandledBy, r.IssuedBy, agName(r.AgentID), r.Category, r.Type, r[cfg.id]].join(' ').toLowerCase().indexOf(q) < 0) return false;
@@ -2436,12 +2510,13 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   function logPage(entity) {
     var cfg = LOGCFG[entity], f = pf(entity, { tab: 'open', q: '', am: '', page: 0 }), rows = logRows(entity, f), all = (S.data[entity] || []).filter(function (r) { return C.live(r) && (!S.g.campaignId || r.CampaignID === S.g.campaignId); });
     var count = function (fn) { return all.filter(fn).length; };
-    var tabs = [['open', 'All open', count(function (r) { return C.isOpen(entity, r); })]].concat(cfg.statuses.map(function (st) { return [st, st, count(function (r) { return r.Status === st; })]; })).concat([['month', 'Logged in ' + monthLabel(S.g.month).split(' ')[0], count(function (r) { return String(r[cfg.date]).slice(0, 7) === S.g.month; })]]);
+    var tabs = [['open', 'All open', count(function (r) { return C.isOpen(entity, r); })], ['breached', 'Past SLA', count(function (r) { return C.slaBreached(entity, r, S.today, S.settings); })]].concat(cfg.statuses.map(function (st) { return [st, st, count(function (r) { return r.Status === st; })]; })).concat([['month', 'Logged in ' + monthLabel(S.g.month).split(' ')[0], count(function (r) { return String(r[cfg.date]).slice(0, 7) === S.g.month; })]]);
     var size = 50; if (f.page * size >= rows.length) f.page = 0;
     var cols = entity === 'issues' ? ['Raised', 'Campaign', 'Issue', 'Accountable', 'Handled by', 'Status', 'Days open', 'Due']
       : entity === 'escalations' ? ['Date', 'Campaign', 'Escalation', 'Severity', 'Agent', 'Accountable', 'Status', 'Days open']
       : entity === 'irs' ? ['Incident', 'Campaign', 'Agent', 'Type', 'Cause', 'Accountable', 'Status', 'Days']
       : ['Received', 'Campaign', 'Agent', 'Category', 'Accountable', 'Handled by', 'Status', 'Days open'];
+    cols = cols.concat(['SLA']);
     var body = rows.slice(f.page * size, f.page * size + size).map(function (r) {
       var open = C.isOpen(entity, r), days = C.daysOpen(entity, r, S.today), dateCell = '<td style="white-space:nowrap">' + esc(fmtDate(r[cfg.date])) + '<div class="t-sub">' + esc(r[cfg.id]) + '</div></td>', acc = '<td>' + esc(accountable(r.CampaignID)) + '</td>';
       var daysCell = '<td class="num">' + (open && days !== null ? days : '—') + '</td>', st = '<td>' + statusPill(r.Status) + '</td>';
@@ -2449,7 +2524,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         : entity === 'escalations' ? dateCell + '<td>' + esc(campName(r.CampaignID)) + '</td><td class="t-title">' + esc(r.Title) + '</td><td>' + pill(r.Severity, SEV_KIND[r.Severity]) + '</td><td>' + esc(r.AgentID ? agName(r.AgentID) : '—') + '</td>' + acc + st + daysCell
         : entity === 'irs' ? dateCell + '<td>' + esc(campName(r.CampaignID)) + '</td><td class="t-title">' + esc(agName(r.AgentID)) + '</td><td>' + esc(r.Type) + '</td><td>' + esc(r.Cause || '—') + '</td>' + acc + st + '<td class="num">' + (r.Status === 'Pending' && days !== null ? days : '—') + '</td>'
         : dateCell + '<td>' + esc(campName(r.CampaignID)) + '</td><td class="t-title">' + esc(agName(r.AgentID)) + '</td><td>' + esc(r.Category) + '</td>' + acc + '<td>' + esc(r.HandledBy || '—') + '</td>' + st + daysCell;
-      return '<tr class="click" tabindex="0" data-act="openRec" data-entity="' + entity + '" data-id="' + esc(r[cfg.id]) + '">' + cells + '</tr>';
+      return '<tr class="click" tabindex="0" data-act="openRec" data-entity="' + entity + '" data-id="' + esc(r[cfg.id]) + '">' + cells + '<td>' + slaPill(entity, r) + '</td></tr>';
     }).join('');
     return '<div class="page-head"><div><p>' + esc(cfg.intro) + '</p></div><div class="actions">' + (rows.length ? '<button class="btn" data-act="exportLog" data-entity="' + entity + '">Export CSV</button>' : '') +
       (C.canWrite(S.user, entity) ? '<button class="btn btn-primary" data-act="newRec" data-entity="' + entity + '">' + esc(cfg.newLabel) + '</button>' : '') + '</div></div>' +
@@ -2476,6 +2551,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var info = cfg.fields.filter(function (x) { return x[0] !== 'Status' && r[x[0]]; }).map(function (x) { return dd(x[1], x[2] === 'camp' ? esc(campName(r[x[0]])) : x[2] === 'agent' ? esc(agName(r[x[0]])) : x[2] === 'date' ? esc(fmtDate(r[x[0]])) : x[2] === 'area' ? '<span style="white-space:pre-wrap">' + esc(r[x[0]]) + '</span>' : esc(r[x[0]]), x[4] === 'wide'); }).join('');
     var m = openModal({ title: esc(r.Title || (agName(r.AgentID) + ' · ' + (r.Type || r.Category || ''))), sub: esc(r[cfg.id] + ' · ' + campName(r.CampaignID)), size: 'lg',
       body: '<div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">' + statusPill(r.Status) + (r.Severity ? pill(r.Severity, SEV_KIND[r.Severity]) : '') + (entity === 'issues' && C.overdue(r, S.today) ? pill('Overdue since ' + fmtDate(r.DueDate), 'bad') : '') + '</div>' +
+        slaBox(entity, r) +
         '<dl class="dl">' + dd('Accountable', '<b>' + esc(accountable(r.CampaignID)) + '</b> <span class="muted small">(account manager)</span>', entity !== 'irs' && entity !== 'grievances') + (entity === 'irs' || entity === 'grievances' ? dd('HR', esc(hrFor(r.CampaignID))) : '') + info + '</dl>' +
         (canW ? '<div class="fgrid" style="margin-top:14px"><div><label class="lbl" for="rv-st">Status</label><select id="rv-st" class="input">' + opts(cfg.statuses, r.Status) + '</select><div class="err" id="rv-e-Status" hidden></div></div>' +
           (entity === 'irs' ? '<div><label class="lbl" for="rv-wr">Reason for waiving</label><input id="rv-wr" class="input" value="' + esc(r.WaiveReason) + '"><div class="err" id="rv-e-WaiveReason" hidden></div></div>' : (entity === 'escalations' || entity === 'grievances') ? '<div class="span2"><label class="lbl" for="rv-res">Resolution</label><textarea id="rv-res" class="input" rows="2">' + esc(r.Resolution) + '</textarea><div class="err" id="rv-e-Resolution" hidden></div></div>' : '<div></div>') +
@@ -2627,6 +2703,44 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         : emptyState('Nothing here', f.tab === 'mine' ? 'No requests are waiting for your answer.' : '')) + '</section>';
   };
   ACT.fuTab = function (el) { S.f.followups.tab = el.dataset.v; render(); };
+
+  // ================= SLA display =================
+  var SLA_LABEL = { breached: ['Past SLA', 'bad'], 'due-soon': ['Due soon', 'warn'], 'on-track': ['On track', ''], met: ['Met', 'ok'], missed: ['Missed', 'warn'] };
+  function slaPill(entity, r) { var x = C.slaInfo(entity, r, S.today, S.settings); if (!x) return '—'; var l = SLA_LABEL[x.status]; return pill(l[0], l[1]); }
+  function slaBox(entity, r) {
+    var x = C.slaInfo(entity, r, S.today, S.settings); if (!x) return '';
+    var line = function (label, due, met, done) { return '<div><dt>' + label + '</dt><dd>' + (due ? esc(fmtDate(due)) : '—') + (met === true ? ' · <span class="g-ok">met' + (done ? ' (' + esc(fmtDate(done)) + ')' : '') + '</span>' : met === false ? ' · <span class="g-warn">missed' + (done ? ' (' + esc(fmtDate(done)) + ')' : '') + '</span>' : '') + '</dd></div>'; };
+    var br = x.breaches.map(function (b2) { return (b2.kind === 'resolve' ? 'Resolution' : 'First update') + ' ' + b2.late + ' day' + (b2.late === 1 ? '' : 's') + ' late'; }).join(' · ');
+    return '<div class="sla-box' + (x.status === 'breached' ? ' bad' : '') + '"><div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap"><b>Response targets</b>' + slaPill(entity, r) + '</div>' + (br ? '<div class="g-bad small" style="margin-top:4px">' + esc(br) + '</div>' : '') +
+      '<dl class="dl" style="margin-top:6px">' + (x.updateDue ? line('First update by', x.updateDue, x.updateMet, x.firstUpdate || x.closedOn) : '') + line(entity === 'irs' ? 'Issued or waived by' : 'Resolved by', x.resolveDue, x.resolveMet, x.closedOn) + '</dl></div>';
+  }
+
+  // ================= monthly report (one printable page) =================
+  PAGES.report = function () {
+    var month = S.g.month, cid = S.g.campaignId, R2 = C.monthlyReport(S.data, month, S.today, S.settings, cid), canG = cap('grievances');
+    R2.attention = R2.attention.slice(0, 6);
+    var pct = function (v) { return v === null || v === undefined ? '—' : Math.round(v) + '%'; }, list = function (arr2) { return arr2.length ? arr2.map(function (x) { return esc(x.label) + ' ' + x.n; }).join(' · ') : 'None'; };
+    var kpis = R2.kpis.filter(function (k) { return k.cur || k.setup; });
+    var logRow = function (e, label) { var l = R2.logs[e]; return '<tr><td>' + label + '</td><td class="num">' + l.newCount + '</td><td class="num">' + l.closed + '</td><td class="num ' + (l.slaRate !== null && l.slaRate < 80 ? 'g-warn' : '') + '">' + pct(l.slaRate) + '</td><td class="num">' + l.openNow + '</td><td class="num ' + (l.breachedNow ? 'g-bad' : '') + '">' + l.breachedNow + '</td></tr>'; };
+    var at = R2.attrition, cur = at.current;
+    return '<div class="page-head no-print"><div><p>A one-page summary of ' + esc(monthLabel(month)) + ' for ' + esc(cid ? campName(cid) : 'the whole site') + '. Choose the month and campaign at the top, then print or save it as a PDF.</p></div><div class="actions"><button class="btn btn-primary" data-act="print">Print / Save as PDF</button></div></div>' +
+      '<article class="rp">' +
+      '<header class="rp-head"><div><div class="rp-org">Alliance Global Solutions · Operations</div><h1>Monthly operations report</h1></div><div class="rp-meta"><b>' + esc(monthLabel(month)) + '</b><br>' + esc(cid ? campName(cid) : 'All campaigns') + '<br>Prepared ' + esc(fmtDate(S.today)) + '</div></header>' +
+      '<section class="rp-sec"><h2>KPIs</h2>' + (kpis.length ? '<table class="rp-t"><thead><tr><th>Campaign</th><th>Accountable</th><th class="num">Agents</th><th class="num">Total Grade</th><th class="num">vs previous</th><th class="num">Graded 1 · 2 · 3 · 4 · 5</th></tr></thead><tbody>' +
+        kpis.map(function (k) { return '<tr><td>' + esc(k.name) + '</td><td>' + esc(accountable(k.campaignId)) + '</td>' + (k.cur ? '<td class="num">' + k.cur.agents + '</td><td class="num"><b>' + k.cur.total.toFixed(2) + '</b></td><td class="num">' + (k.delta === null ? '—' : (k.delta > 0 ? '+' : '') + k.delta.toFixed(2)) + '</td><td class="num">' + k.cur.dist.join(' · ') + '</td>' : '<td colspan="4" class="muted">No results for this month</td>') + '</tr>'; }).join('') + '</tbody></table>' : '<p class="muted">No campaigns with score guides yet.</p>') +
+        (R2.top.length ? '<div class="rp-2"><div><h3>Top 5</h3><ol>' + R2.top.map(function (x) { return '<li>' + esc(x.name) + ' · ' + x.total.toFixed(2) + '</li>'; }).join('') + '</ol></div>' + (R2.bottom.length ? '<div><h3>Bottom 5</h3><ol>' + R2.bottom.map(function (x) { return '<li>' + esc(x.name) + ' · ' + x.total.toFixed(2) + '</li>'; }).join('') + '</ol></div>' : '') + '</div>' : '') + '</section>' +
+      '<section class="rp-sec"><h2>Logs and response targets</h2><table class="rp-t"><thead><tr><th>Log</th><th class="num">New</th><th class="num">Closed</th><th class="num">Closed within SLA</th><th class="num">Open now</th><th class="num">Past SLA now</th></tr></thead><tbody>' +
+        logRow('issues', 'Client issues') + logRow('escalations', 'Client escalations') + logRow('irs', 'Incident reports') + (canG ? logRow('grievances', 'Agent grievances') : '') + '</tbody></table>' +
+        '<div class="rp-2"><div><h3>Escalations by severity</h3><p>' + list(R2.escalationsBySeverity) + '</p><h3>Root causes (resolved this month)</h3><p>' + list(R2.rootCauses) + '</p></div><div><h3>IRs by type</h3><p>' + list(R2.irsByType) + '</p><h3>IRs by status</h3><p>' + list(R2.irsByStatus) + '</p>' + (canG ? '<h3>Grievances by category</h3><p>' + list(R2.grievancesByCategory) + '</p>' : '') + '</div></div></section>' +
+      '<section class="rp-sec rp-2"><div><h2>People</h2><table class="rp-t"><tbody><tr><td>Headcount at month end</td><td class="num"><b>' + cur.headEnd + '</b></td></tr><tr><td>Separations</td><td class="num">' + cur.separations + '</td></tr><tr><td>Attrition this month</td><td class="num">' + (cur.rate === null ? '—' : cur.rate.toFixed(1) + '%') + '</td></tr><tr><td>Attrition year to date</td><td class="num">' + (at.ytdRate === null ? '—' : at.ytdRate.toFixed(1) + '%') + ' (' + at.ytdSeparations + ')</td></tr></tbody></table></div>' +
+        '<div><h2>Follow-ups</h2><table class="rp-t"><tbody><tr><td>Requested this month</td><td class="num"><b>' + R2.followUps.asked + '</b></td></tr><tr><td>Answered by the due date</td><td class="num">' + R2.followUps.answeredOnTime + '</td></tr></tbody></table></div></section>' +
+      '<section class="rp-sec"><h2>Accountability</h2>' + (R2.accountManagers.length ? '<table class="rp-t"><thead><tr><th>Account manager</th><th>Campaigns</th><th class="num">Total Grade</th><th class="num">Open issues</th><th class="num">Open escalations</th><th class="num">Past SLA</th></tr></thead><tbody>' +
+        R2.accountManagers.map(function (m) { return '<tr><td>' + esc(m.name) + '</td><td>' + esc(m.campaignIds.map(campName).join(', ')) + '</td><td class="num">' + (m.total === null ? '—' : m.total.toFixed(2)) + '</td><td class="num">' + m.issues + '</td><td class="num">' + m.escalations + '</td><td class="num ' + (m.breaches ? 'g-bad' : '') + '">' + m.breaches + '</td></tr>'; }).join('') + '</tbody></table>' : '<p class="muted">No account managers assigned.</p>') + '</section>' +
+      '<section class="rp-sec"><h2>Needs attention now</h2>' + (R2.attention.length ? '<ul>' + R2.attention.map(function (x) { return '<li><b>' + esc(x.kind) + ':</b> ' + esc(x.title) + (x.campaignId ? ' <span class="muted">(' + esc(campName(x.campaignId)) + ', ' + esc(accountable(x.campaignId)) + ')</span>' : '') + '</li>'; }).filter(function (h, i2) { return R2.attention[i2].entity !== 'grievances' || canG; }).join('') + '</ul>' : '<p class="muted">Nothing overdue or critical.</p>') + '</section>' +
+      '<footer class="rp-foot">AGS Operations Hub · figures as of ' + esc(fmtDate(S.today)) + ' · SLA targets from Settings</footer></article>';
+  };
+
+  ACT.print = function () { window.print(); };
   function simpleForm(o) {
     // o: {title, entity, rec, fields:[{k,label,type,options,req,hint,span}], action, payloadKey, after}
     var r = o.rec || {};
@@ -2731,7 +2845,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       var keys = Object.keys(C.DEFAULT_SETTINGS);
       return '<div class="page-head"><div><p>Changes apply immediately for everyone and are recorded in the audit log.</p></div></div><section class="panel"><div class="panel-b"><div class="fgrid">' + keys.map(function (k) {
         var v = S.settings[k], id = 'st-' + k, input = /Days$/.test(k) ? '<input id="' + id + '" class="input" type="number" min="0" max="999" data-st="' + k + '" value="' + esc(v) + '">' : k === 'Environment' ? '<select id="' + id + '" class="input" data-st="' + k + '">' + opts(['PROTOTYPE', 'PRODUCTION'], v) + '</select>' : '<input id="' + id + '" class="input" data-st="' + k + '" value="' + esc(v) + '">';
-        return '<div><label class="lbl" for="' + id + '">' + esc(({ Timezone: 'Timezone', Environment: 'Environment', IRPendingDays: 'Flag IRs pending longer than (days)', GrievanceDays: 'Flag grievances open longer than (days)', EscalationStaleDays: 'Flag escalations without an update for (days)', FollowUpDays: 'Default days to answer a follow-up', AppUrl: 'App address (for links in emails)', WeeklySummaryTo: 'Monday summary sent to (empty = all Executives)' })[k] || k) + '</label>' + input + '<div class="hint">' + esc(C.DEFAULT_SETTINGS[k][1]) + '</div><div class="err" id="e-' + k + '" hidden></div></div>';
+        return '<div><label class="lbl" for="' + id + '">' + esc(({ Timezone: 'Timezone', Environment: 'Environment', IRPendingDays: 'Flag IRs pending longer than (days)', GrievanceDays: 'Flag grievances open longer than (days)', EscalationStaleDays: 'Flag escalations without an update for (days)', FollowUpDays: 'Default days to answer a follow-up', IRPendingDays: 'SLA · IR issued or waived within (days)', GrievanceAckDays: 'SLA · grievance acknowledged within (days)', GrievanceDays: 'SLA · grievance resolved within (days)', IssueResolveDays: 'SLA · client issue resolved within, if no due date (days)', SlaCriticalUpdateDays: 'SLA · Critical escalation: first update within (days)', SlaCriticalResolveDays: 'SLA · Critical escalation: resolved within (days)', SlaHighUpdateDays: 'SLA · High escalation: first update within (days)', SlaHighResolveDays: 'SLA · High escalation: resolved within (days)', SlaMediumUpdateDays: 'SLA · Medium escalation: first update within (days)', SlaMediumResolveDays: 'SLA · Medium escalation: resolved within (days)', SlaLowUpdateDays: 'SLA · Low escalation: first update within (days)', SlaLowResolveDays: 'SLA · Low escalation: resolved within (days)', AppUrl: 'App address (for links in emails)', WeeklySummaryTo: 'Monday summary sent to (empty = all Executives)' })[k] || k) + '</label>' + input + '<div class="hint">' + esc(C.DEFAULT_SETTINGS[k][1]) + '</div><div class="err" id="e-' + k + '" hidden></div></div>';
       }).join('') + '</div><div class="row" style="margin-top:16px"><button class="btn btn-primary" data-act="saveSettings">Save settings</button></div></div></section>';
     },
     audit: function (f) {

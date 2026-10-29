@@ -604,10 +604,10 @@ var AGSCore = (function () {
   var APP_NAME = 'Operations Hub';
 
   // ------------------------------------------------------------------ roles
-  var ROLES = { ADMIN: 'ADMIN', EXEC: 'EXECUTIVE', AM: 'ACCOUNT_MANAGER', SUP: 'SUPERVISOR', HR: 'HR' };
-  var ROLE_LABELS = { ADMIN: 'Admin', EXECUTIVE: 'Executive', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor', HR: 'HR' };
-  var ASSIGNABLE_ROLES = ['ADMIN', 'EXECUTIVE', 'ACCOUNT_MANAGER', 'SUPERVISOR', 'HR'];
-  var CAMPAIGN_ROLES = ['SUPERVISOR'];            // supervisors: Users.CampaignIDs; account managers: Campaigns.AccountManagerIDs
+  var ROLES = { ADMIN: 'ADMIN', EXEC: 'EXECUTIVE', AM: 'ACCOUNT_MANAGER', HR: 'HR' };
+  var ROLE_LABELS = { ADMIN: 'Admin', EXECUTIVE: 'Executive', ACCOUNT_MANAGER: 'Account manager', HR: 'HR' };
+  var ASSIGNABLE_ROLES = ['ADMIN', 'EXECUTIVE', 'ACCOUNT_MANAGER', 'HR'];
+  var CAMPAIGN_ROLES = [];                        // campaigns are assigned on each campaign: AccountManagerIDs and HRIDs
 
   // ------------------------------------------------------------------ lists (editable later in Settings → Settings)
   var LISTS = {
@@ -627,7 +627,7 @@ var AGSCore = (function () {
   // ------------------------------------------------------------------ schema
   var META = ['IsSynthetic', 'CreatedAt', 'CreatedBy', 'UpdatedAt', 'UpdatedBy', 'RecordVersion', 'ArchivedAt', 'ArchivedBy'];
   var SCHEMA = {
-    Campaigns: ['CampaignID', 'Name', 'Status', 'AccountManagerIDs', 'Description'].concat(META),
+    Campaigns: ['CampaignID', 'Name', 'Status', 'AccountManagerIDs', 'HRIDs', 'Description'].concat(META),
     Agents: ['AgentID', 'EmployeeID', 'FullName', 'CampaignID', 'Shift', 'Profile', 'TeamLead', 'HireDate', 'SeparationDate', 'SeparationType', 'SeparationReason', 'Notes'].concat(META),
     Issues: ['IssueID', 'CampaignID', 'RaisedDate', 'Title', 'Impact', 'Details', 'HandledBy', 'DueDate', 'Status', 'ResolvedDate', 'Updates'].concat(META),
     Escalations: ['EscalationID', 'CampaignID', 'EscalationDate', 'Title', 'ClientContact', 'AgentID', 'Severity', 'Details', 'RootCause', 'Resolution', 'HandledBy', 'Status', 'ResolvedDate', 'Updates'].concat(META),
@@ -695,7 +695,7 @@ var AGSCore = (function () {
   function E(o) { return { t: 'enum', o: o }; }
   var D = { t: 'date' }, B = { t: 'bool' }, ID = { t: 'id' }, IDS = { t: 'ids' }, J = { t: 'json' }, MON = { t: 'month' };
   var FIELDS = {
-    campaigns: { Name: T(80), Status: E(LISTS.ActiveStatus), AccountManagerIDs: IDS, Description: T(1000) },
+    campaigns: { Name: T(80), Status: E(LISTS.ActiveStatus), AccountManagerIDs: IDS, HRIDs: IDS, Description: T(1000) },
     agents: { EmployeeID: T(50), FullName: T(120), CampaignID: ID, Shift: E(['', 'AM', 'PM']), Profile: T(60), TeamLead: T(120), HireDate: D, SeparationDate: D, SeparationType: E([''].concat(LISTS.SeparationType)), SeparationReason: T(1000), Notes: T(1000) },
     issues: { CampaignID: ID, RaisedDate: D, Title: T(200), Impact: T(1000), Details: T(6000), HandledBy: T(120), DueDate: D, Status: E(LISTS.IssueStatus), ResolvedDate: D },
     escalations: { CampaignID: ID, EscalationDate: D, Title: T(200), ClientContact: T(200), AgentID: ID, Severity: E(LISTS.Severity), Details: T(6000), RootCause: T(2000), Resolution: T(4000), HandledBy: T(120), Status: E(LISTS.EscalationStatus), ResolvedDate: D },
@@ -836,14 +836,12 @@ var AGSCore = (function () {
   function isAdmin(u) { return !!u && u.role === ROLES.ADMIN; }
   function isExec(u) { return !!u && u.role === ROLES.EXEC; }
   function isAM(u) { return !!u && u.role === ROLES.AM; }
-  function isSup(u) { return !!u && u.role === ROLES.SUP; }
   function isHR(u) { return !!u && u.role === ROLES.HR; }
-  // What each role may change: Admin all; Account managers everything in their campaigns; Supervisors issues, escalations and IRs;
-  // HR: IRs, grievances and the agent roster (separations and hire dates for attrition), in all campaigns.
+  // What each role may change: Admin all; Account managers everything in their campaigns;
+  // HR: IRs, grievances and the agent roster (separations and hire dates for attrition), in the campaigns they cover.
   function canWrite(u, entity) {
     if (isAdmin(u)) return true;
     if (isAM(u)) return ['agents', 'issues', 'escalations', 'irs', 'grievances', 'kpiRows'].indexOf(entity) >= 0;
-    if (isSup(u)) return ['issues', 'escalations', 'irs'].indexOf(entity) >= 0;
     if (isHR(u)) return ['irs', 'grievances', 'agents'].indexOf(entity) >= 0;
     return false;
   }
@@ -854,13 +852,12 @@ var AGSCore = (function () {
   }
 
   // ------------------------------------------------------------------ data scope (server-enforced)
-  // Admin, Executive and HR: all campaigns. Account manager: campaigns listing them in AccountManagerIDs.
-  // Supervisor: Users.CampaignIDs. Grievances: never sent to supervisors.
+  // Admin and Executive: all campaigns. Account manager: campaigns listing them in AccountManagerIDs. HR: campaigns listing them in HRIDs.
   function buildScope(repo, u) {
-    if (isAdmin(u) || isExec(u) || isHR(u)) return { all: true, grievances: true };
+    if (isAdmin(u) || isExec(u)) return { all: true, grievances: true };
     var sc = { all: false, camps: {}, grievances: canSeeGrievances(u) };
-    if (isAM(u)) repo.all('campaigns').forEach(function (c) { if (splitIds(c.AccountManagerIDs).indexOf(u.userId) >= 0) sc.camps[c.CampaignID] = true; });
-    else (u.campaignIds || []).forEach(function (c) { sc.camps[c] = true; });
+    var field = isAM(u) ? 'AccountManagerIDs' : isHR(u) ? 'HRIDs' : '';
+    if (field) repo.all('campaigns').forEach(function (c) { if (splitIds(c[field]).indexOf(u.userId) >= 0) sc.camps[c.CampaignID] = true; });
     return sc;
   }
   function inScope(sc, entity, r) {
@@ -942,6 +939,10 @@ var AGSCore = (function () {
         irs: (data.irs || []).filter(function (r) { return inC(r) && r.Status === 'Pending'; }).length,
         grievances: (data.grievances || []).filter(function (r) { return inC(r) && isOpen('grievances', r); }).length };
     }).sort(function (a, c) { return a.name < c.name ? -1 : 1; });
+  }
+  function hrNames(data, campaignId) {
+    var c = (data.campaigns || []).filter(function (x) { return x.CampaignID === campaignId; })[0], users = byKey(data.users || [], 'UserID');
+    return c ? splitIds(c.HRIDs).map(function (u) { return (users[u] || {}).DisplayName || u; }) : [];
   }
   function accountableNames(data, campaignId) {
     var c = (data.campaigns || []).filter(function (x) { return x.CampaignID === campaignId; })[0], users = byKey(data.users || [], 'UserID');
@@ -1052,7 +1053,7 @@ var AGSCore = (function () {
     var inclArch = isAdmin(ctx.user) && !!p.includeArchived, out = {};
     DATA_ENTITIES.forEach(function (e) { out[e] = ctx.repo.all(e).filter(function (r) { return (inclArch || live(r)) && (e === 'kpiGuides' ? (ctx.scope().all || ctx.scope().camps[r.CampaignID]) : ctx.visible(e, r)); }); });
     if (!ctx.scope().grievances) out.grievances = [];
-    out.users = isAdmin(ctx.user) ? ctx.repo.all('users') : ctx.repo.all('users').filter(function (r) { return live(r) && ([ROLES.AM, ROLES.ADMIN].indexOf(normRole(r.Role)) >= 0 || s(r.Email).toLowerCase() === ctx.user.email); })
+    out.users = isAdmin(ctx.user) ? ctx.repo.all('users') : ctx.repo.all('users').filter(function (r) { return live(r) && ([ROLES.AM, ROLES.ADMIN, ROLES.HR].indexOf(normRole(r.Role)) >= 0 || s(r.Email).toLowerCase() === ctx.user.email); })
       .map(function (r) { return { UserID: r.UserID, DisplayName: r.DisplayName, Role: r.Role, Email: s(r.Email).toLowerCase() === ctx.user.email ? r.Email : '', Active: r.Active }; });
     out.settings = ctx.settings; out.user = publicUser(ctx.user); out.serverTime = ctx.now; out.today = ctx.today; out.coreVersion = CORE_VERSION;
     return out;
@@ -1205,6 +1206,7 @@ var AGSCore = (function () {
       if (!m.Status) m.Status = f.Status = 'Active'; requireFields(e, m, ['Name'], '');
       if (m.Name && !uniqueAmong(ctx, 'campaigns', 'Name', m.Name, ex && ex.CampaignID)) e.Name = 'Another campaign already uses this name.';
       splitIds(m.AccountManagerIDs).forEach(function (uid) { var u = ctx.find('users', uid); if (!u || u.ArchivedAt || [ROLES.AM, ROLES.ADMIN].indexOf(normRole(u.Role)) < 0) e.AccountManagerIDs = 'Account managers must be users with the Account manager or Admin role.'; });
+      splitIds(m.HRIDs).forEach(function (uid) { var u = ctx.find('users', uid); if (!u || u.ArchivedAt || normRole(u.Role) !== ROLES.HR) e.HRIDs = 'Choose users with the HR role.'; });
     });
   } };
   H.saveAgent = { write: true, fn: function (ctx, p) {
@@ -1364,8 +1366,8 @@ var AGSCore = (function () {
     var ams = { Legacy: [am1], Banyan: [am1], Takahami: [am1], Flyland: [am2], TBT: [am2], EMB: [am2], Fundward: [am3, am4], 'Alternative Funding': [am3, am4] };
     var camp = {};
     CAMPAIGN_NAMES.forEach(function (nm) { var c = rec('campaigns', { Name: nm, Status: 'Active', AccountManagerIDs: ams[nm].map(function (u) { return u.UserID; }).join(','), Description: '' }, year + '-01-02'); D.campaigns.push(c); camp[nm] = c; });
-    U('rafael.mendoza@example.com', 'Rafael Mendoza', 'SUPERVISOR', { CampaignIDs: [camp.Legacy.CampaignID, camp.Banyan.CampaignID].join(',') });
-    U('lorna.diaz@example.com', 'Lorna Diaz', 'HR');
+    var hr1 = U('lorna.diaz@example.com', 'Lorna Diaz', 'HR'), hr2 = U('mark.tolentino@example.com', 'Mark Tolentino', 'HR');
+    D.campaigns.forEach(function (c) { c.HRIDs = (['Legacy', 'Banyan', 'Takahami', 'Flyland'].indexOf(c.Name) >= 0 ? hr1 : hr2).UserID; });
     startingGuides().forEach(function (g) { D.kpiGuides.push(rec('kpiGuides', { CampaignID: camp[g[0]].CampaignID, Name: g[1], Shift: g[2], Profile: g[3], EffectiveFrom: year + '-01', Definition: JSON.stringify(g[4]), Active: 'TRUE' }, year + '-01-02')); });
     // agents
     var first = ['Bea', 'Carlo', 'Dana', 'Elijah', 'Faye', 'Gino', 'Hazel', 'Ivan', 'Jasmine', 'Kevin', 'Lara', 'Miguel', 'Nina', 'Oscar', 'Paula', 'Quinn', 'Rina', 'Sam', 'Tess', 'Ulysses', 'Vina', 'Warren', 'Ysa', 'Zack'];
@@ -1433,7 +1435,7 @@ var AGSCore = (function () {
     AgsError: AgsError, s: s, n: n, b: b, isIsoDate: isIsoDate, addDays: addDays, diffDays: diffDays, json: json, arr: arr, rate: rate, fmtRate: fmtRate, round: round, clone: clone,
     isEmail: isEmail, live: live, blank: blank, byKey: byKey, splitIds: splitIds, settingsWithDefaults: settingsWithDefaults, normRole: normRole, periodOf: periodOf, daysInMonth: daysInMonth,
     sanitize: sanitize, parseRaw: parseRaw, fmtTime: fmtTime, fmtKpi: fmtKpi, evalFormula: evalFormula, gradeFor: gradeFor, scoreRow: scoreRow, validateGuide: validateGuide, guideFor: guideFor,
-    isAdmin: isAdmin, isExec: isExec, isAM: isAM, isSup: isSup, isHR: isHR, canWrite: canWrite, canSeeGrievances: canSeeGrievances, capabilities: capabilities, buildScope: buildScope, inScope: inScope,
+    isAdmin: isAdmin, isExec: isExec, isAM: isAM, isHR: isHR, hrNames: hrNames, canWrite: canWrite, canSeeGrievances: canSeeGrievances, capabilities: capabilities, buildScope: buildScope, inScope: inScope,
     buildIndex: buildIndex, monthAdd: monthAdd, monthEnd: monthEnd, isOpen: isOpen, dateOf: dateOf, daysOpen: daysOpen, overdue: overdue, lastUpdate: lastUpdate,
     kpiCampaign: kpiCampaign, kpiOverview: kpiOverview, logSummary: logSummary, headcountOn: headcountOn, attrition: attrition, accountManagers: accountManagers, accountableNames: accountableNames, needsAttention: needsAttention,
     csvCell: csvCell, toCsv: toCsv, handle: handle, resolveUser: resolveUser, publicUser: publicUser, generateSynthetic: generateSynthetic,
@@ -1977,12 +1979,12 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       try {
         S.demoT = S.demoT || new DemoTransport();
         var repo = S.demoT.repo, camps = C.byKey(repo.all('campaigns'), 'CampaignID');
-        var rank = { EXECUTIVE: 0, ADMIN: 1, ACCOUNT_MANAGER: 2, SUPERVISOR: 3, HR: 4 };
+        var rank = { EXECUTIVE: 0, ADMIN: 1, ACCOUNT_MANAGER: 2, HR: 3 };
         var users = S.demoT.users().filter(function (u) { return C.ASSIGNABLE_ROLES.indexOf(C.normRole(u.Role)) >= 0; }).sort(function (a, b) { var x = rank[C.normRole(a.Role)], y = rank[C.normRole(b.Role)]; return x !== y ? x - y : (a.DisplayName < b.DisplayName ? -1 : 1); });
-        var roleSub = { ADMIN: 'Admin, all campaigns', EXECUTIVE: 'Executive, all campaigns (view only)', ACCOUNT_MANAGER: 'Account manager', SUPERVISOR: 'Supervisor', HR: 'HR, all campaigns: IRs, grievances, separations' };
+        var roleSub = { ADMIN: 'Admin, all campaigns', EXECUTIVE: 'Executive, all campaigns (view only)', ACCOUNT_MANAGER: 'Account manager', HR: 'HR' };
         demoHtml = '<section class="login-card" aria-labelledby="demo-h"><h2 id="demo-h">Explore with synthetic data</h2><p class="muted small">Every person and number in the demo is invented. Demo changes stay in this browser and never reach Google Sheets. Choose who to act as:</p><div class="demo-users">' +
           users.map(function (u) {
-            var sub = (roleSub[C.normRole(u.Role)] || u.Role) + (C.splitIds(u.CampaignIDs).length ? ': ' + C.splitIds(u.CampaignIDs).map(function (c) { return (camps[c] || {}).Name || c; }).join(', ') : '') + (C.normRole(u.Role) === 'ACCOUNT_MANAGER' ? ': ' + repo.all('campaigns').filter(function (c) { return C.splitIds(c.AccountManagerIDs).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') : '');
+            var sub = (roleSub[C.normRole(u.Role)] || u.Role) + (C.splitIds(u.CampaignIDs).length ? ': ' + C.splitIds(u.CampaignIDs).map(function (c) { return (camps[c] || {}).Name || c; }).join(', ') : '') + (C.normRole(u.Role) === 'ACCOUNT_MANAGER' || C.normRole(u.Role) === 'HR' ? ': ' + repo.all('campaigns').filter(function (c) { return C.splitIds(C.normRole(u.Role) === 'HR' ? c.HRIDs : c.AccountManagerIDs).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') : '');
             return '<button class="demo-user" data-act="demoLogin" data-email="' + esc(u.Email) + '"><span class="avatar">' + esc(initials(u.DisplayName)) + '</span><span>' + esc(u.DisplayName) + '<small>' + esc(sub) + '</small></span></button>';
           }).join('') + '</div><div class="row" style="margin-top:10px"><span class="small muted">Demo data generated for ' + esc(fmtDate(S.demoT.state.generatedFor)) + '.</span><button class="btn btn-sm btn-ghost" data-act="demoResetLogin">Reset demo data</button></div></section>';
       } catch (e) { demoHtml = '<div class="note bad">The demo could not start: ' + esc(e.message) + '</div>'; }
@@ -2085,7 +2087,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     $('#page-title').textContent = TITLES[page];
     $('#page-sub').textContent = (S.g.campaignId ? campName(S.g.campaignId) : 'All your campaigns') + (MONTH_PAGES[page] ? ' · ' + monthLabel(S.g.month) : '') + (C.isExec(S.user) ? ' · view only' : '');
     document.title = TITLES[page] + ' — AGS Operations Hub';
-    var noScope = S.user.role === 'SUPERVISOR' && !(S.user.campaignIds || []).length || (S.user.role === 'ACCOUNT_MANAGER' && !liveCamps().length);
+    var noScope = (S.user.role === 'ACCOUNT_MANAGER' || S.user.role === 'HR') && !liveCamps().length;
     try {
       if (noScope) { $('#page').innerHTML = '<div class="note warn" role="alert" style="max-width:640px">No campaigns are assigned to your account yet, so there is nothing to show. Ask an Admin to assign your campaigns in Settings.</div>'; paintSync(); return; }
       var out = PAGES[page]();
@@ -2112,6 +2114,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     out.campaigns = S.data.campaigns.filter(function (c) { return c.CampaignID === S.g.campaignId; }); return out;
   }
   function accountable(cid) { var n2 = C.accountableNames(S.data, cid); return n2.length ? n2.join(', ') : 'Not assigned'; }
+  function hrFor(cid) { var n2 = C.hrNames(S.data, cid); return n2.length ? n2.join(', ') : 'Not assigned'; }
   function gradeCls(g) { return g === null || g === undefined ? '' : (+g < 1.5 ? 'g-bad' : +g < 2.5 ? 'g-warn' : ''); }
   function totalCls(t) { return t === null || t === undefined ? '' : (+t < 2 ? 'g-bad' : +t < 2.5 ? 'g-warn' : ''); }
   function pill(text, kind) { return '<span class="pill' + (kind ? ' pill-' + kind : '') + '">' + esc(text) + '</span>'; }
@@ -2301,10 +2304,10 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
       intro: 'Client escalations. Critical and high ones, and any without an update for a few days, appear on the overview.',
       fields: [['CampaignID', 'Campaign', 'camp', 1], ['EscalationDate', 'Date', 'date', 1], ['Title', 'Escalation', 'text', 1, 'wide'], ['Severity', 'Severity', 'sev', 1], ['ClientContact', 'Client contact', 'text'], ['AgentID', 'Agent involved', 'agent'], ['Details', 'Details', 'area', 0, 'wide'], ['RootCause', 'Root cause', 'text', 0, 'wide'], ['Resolution', 'Resolution', 'area', 0, 'wide'], ['HandledBy', 'Handled by', 'text'], ['Status', 'Status', 'status']] },
     irs: { id: 'IRID', date: 'IncidentDate', statuses: C.LISTS.IRStatus, noun: 'incident report', newLabel: 'New IR',
-      intro: 'Incident reports: pending until issued or waived. Waiving needs a reason.',
+      intro: 'Incident reports: pending until issued or waived. Waiving needs a reason. HR covers the IRs of the campaigns assigned to them.',
       fields: [['CampaignID', 'Campaign', 'camp', 1], ['AgentID', 'Agent', 'agent', 1], ['IncidentDate', 'Incident date', 'date', 1], ['Type', 'Type', 'irtype', 1], ['Cause', 'Cause', 'text', 0, 'wide'], ['Details', 'Details', 'area', 0, 'wide'], ['IssuedBy', 'Issued by', 'text'], ['Status', 'Status', 'status'], ['IssuedDate', 'Issued on', 'date'], ['WaiveReason', 'Reason for waiving', 'area', 0, 'wide']] },
     grievances: { id: 'GrievanceID', date: 'ReceivedDate', statuses: C.LISTS.GrievanceStatus, noun: 'grievance', newLabel: 'New grievance',
-      intro: 'Confidential: only the Executive, Admins and the campaign\'s account managers can see grievances.',
+      intro: 'Confidential: only the Executive, Admins, and the campaign\'s account managers and HR can see grievances.',
       fields: [['CampaignID', 'Campaign', 'camp', 1], ['AgentID', 'Agent', 'agent', 1], ['ReceivedDate', 'Date received', 'date', 1], ['Category', 'Category', 'gcat', 1], ['Details', 'Details', 'area', 1, 'wide'], ['HandledBy', 'Handled by', 'text'], ['Status', 'Status', 'status'], ['Resolution', 'Resolution', 'area', 0, 'wide']] }
   };
   function amUsers() { return (S.data.users || []).filter(function (u) { return C.live(u) && ['ACCOUNT_MANAGER', 'ADMIN'].indexOf(C.normRole(u.Role)) >= 0; }).sort(function (a, b) { return a.DisplayName < b.DisplayName ? -1 : 1; }); }
@@ -2363,7 +2366,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     var info = cfg.fields.filter(function (x) { return x[0] !== 'Status' && r[x[0]]; }).map(function (x) { return dd(x[1], x[2] === 'camp' ? esc(campName(r[x[0]])) : x[2] === 'agent' ? esc(agName(r[x[0]])) : x[2] === 'date' ? esc(fmtDate(r[x[0]])) : x[2] === 'area' ? '<span style="white-space:pre-wrap">' + esc(r[x[0]]) + '</span>' : esc(r[x[0]]), x[4] === 'wide'); }).join('');
     var m = openModal({ title: esc(r.Title || (agName(r.AgentID) + ' · ' + (r.Type || r.Category || ''))), sub: esc(r[cfg.id] + ' · ' + campName(r.CampaignID)), size: 'lg',
       body: '<div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">' + statusPill(r.Status) + (r.Severity ? pill(r.Severity, SEV_KIND[r.Severity]) : '') + (entity === 'issues' && C.overdue(r, S.today) ? pill('Overdue since ' + fmtDate(r.DueDate), 'bad') : '') + '</div>' +
-        '<dl class="dl">' + dd('Accountable', '<b>' + esc(accountable(r.CampaignID)) + '</b> <span class="muted small">(account manager)</span>', true) + info + '</dl>' +
+        '<dl class="dl">' + dd('Accountable', '<b>' + esc(accountable(r.CampaignID)) + '</b> <span class="muted small">(account manager)</span>', entity !== 'irs' && entity !== 'grievances') + (entity === 'irs' || entity === 'grievances' ? dd('HR', esc(hrFor(r.CampaignID))) : '') + info + '</dl>' +
         (canW ? '<div class="fgrid" style="margin-top:14px"><div><label class="lbl" for="rv-st">Status</label><select id="rv-st" class="input">' + opts(cfg.statuses, r.Status) + '</select><div class="err" id="rv-e-Status" hidden></div></div>' +
           (entity === 'irs' ? '<div><label class="lbl" for="rv-wr">Reason for waiving</label><input id="rv-wr" class="input" value="' + esc(r.WaiveReason) + '"><div class="err" id="rv-e-WaiveReason" hidden></div></div>' : (entity === 'escalations' || entity === 'grievances') ? '<div class="span2"><label class="lbl" for="rv-res">Resolution</label><textarea id="rv-res" class="input" rows="2">' + esc(r.Resolution) + '</textarea><div class="err" id="rv-e-Resolution" hidden></div></div>' : '<div></div>') +
           '<div class="span2"><label class="lbl" for="rv-note">Add an update</label><textarea id="rv-note" class="input" rows="2" placeholder="What happened, what\'s next"></textarea></div></div>' : '') +
@@ -2511,9 +2514,9 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   function editBtn(act, id) { return { html: '<button class="btn btn-sm" data-act="' + act + '" data-id="' + esc(id) + '">Edit</button>' }; }
   var SETTINGS = {
     campaigns: function () {
-      return '<div class="page-head"><div><p>Every client issue, escalation, IR and grievance in a campaign is accountable to its account managers. A campaign can have more than one; both are accountable. Users with the Account manager or Admin role can be chosen.</p></div><div class="actions"><button class="btn btn-primary" data-act="editCampaign">Add campaign</button></div></div>' +
-        '<section class="panel">' + tblS(['Campaign', 'Status', 'Account managers', 'Agents', 'Score guides', ''], S.data.campaigns.filter(C.live).map(function (c) {
-          return [{ html: '<b>' + esc(c.Name) + '</b>' }, c.Status, accountable(c.CampaignID), S.data.agents.filter(function (a) { return C.live(a) && a.CampaignID === c.CampaignID && !a.SeparationDate; }).length,
+      return '<div class="page-head"><div><p>Every client issue, escalation, IR and grievance in a campaign is accountable to its account managers. HR covers the campaign\'s IRs, grievances and separations. A campaign can have more than one of each.</p></div><div class="actions"><button class="btn btn-primary" data-act="editCampaign">Add campaign</button></div></div>' +
+        '<section class="panel">' + tblS(['Campaign', 'Status', 'Account managers', 'HR', 'Agents', 'Score guides', ''], S.data.campaigns.filter(C.live).map(function (c) {
+          return [{ html: '<b>' + esc(c.Name) + '</b>' }, c.Status, accountable(c.CampaignID), hrFor(c.CampaignID), S.data.agents.filter(function (a) { return C.live(a) && a.CampaignID === c.CampaignID && !a.SeparationDate; }).length,
             S.data.kpiGuides.filter(function (g) { return C.live(g) && g.CampaignID === c.CampaignID; }).length || 'none yet', editBtn('editCampaign', c.CampaignID)];
         })) + '</section>';
     },
@@ -2536,9 +2539,9 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
         }).join('');
     },
     users: function () {
-      return '<div class="page-head"><div><p>Only active users listed here can sign in. Executive: sees everything, changes nothing. Admin: everything. Account manager: their campaigns (set on each campaign). Supervisor: assigned campaigns; issues, escalations and IRs; no grievances. HR: all campaigns; logs IRs and grievances and records separations; views everything else.</p></div><div class="actions"><button class="btn btn-primary" data-act="editUser">Add user</button></div></div>' +
+      return '<div class="page-head"><div><p>Only active users listed here can sign in. Executive: sees everything, changes nothing. Admin: everything. Account manager: their campaigns, set on each campaign. HR: the campaigns they cover, also set on each campaign; logs IRs and grievances and records separations, and views everything else there.</p></div><div class="actions"><button class="btn btn-primary" data-act="editUser">Add user</button></div></div>' +
         '<section class="panel">' + tblS(['Name', 'Email', 'Role', 'Campaigns', 'Access', ''], S.data.users.filter(C.live).sort(function (a, b) { return a.DisplayName < b.DisplayName ? -1 : 1; }).map(function (u) {
-          var r = C.normRole(u.Role), camps = r === 'ACCOUNT_MANAGER' ? liveCamps().filter(function (c) { return C.splitIds(c.AccountManagerIDs).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') || 'none yet' : r === 'SUPERVISOR' ? C.splitIds(u.CampaignIDs).map(campName).join(', ') : 'All';
+          var r = C.normRole(u.Role), fld = r === 'ACCOUNT_MANAGER' ? 'AccountManagerIDs' : r === 'HR' ? 'HRIDs' : '', camps = fld ? liveCamps().filter(function (c) { return C.splitIds(c[fld]).indexOf(u.UserID) >= 0; }).map(function (c) { return c.Name; }).join(', ') || 'none yet (set on Campaigns)' : 'All';
           return [{ html: '<b>' + esc(u.DisplayName) + '</b>' }, u.Email, C.ROLE_LABELS[r] || u.Role, camps, C.b(u.Active) ? 'Active' : 'Inactive', editBtn('editUser', u.UserID)];
         })) + '</section>';
     },
@@ -2560,12 +2563,14 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
   };
   CHG.setShowSep = function (el) { S.f.settings.showSep = el.checked; render(); };
   ACT.editCampaign = function (el) {
-    var c = el && el.dataset.id ? S.idx.camps[el.dataset.id] : null, cur = c ? C.splitIds(c.AccountManagerIDs) : [];
+    var c = el && el.dataset.id ? S.idx.camps[el.dataset.id] : null, cur = c ? C.splitIds(c.AccountManagerIDs) : [], curHr = c ? C.splitIds(c.HRIDs) : [];
+    var hrUsers = (S.data.users || []).filter(function (u) { return C.live(u) && C.normRole(u.Role) === 'HR'; }).sort(function (a, b) { return a.DisplayName < b.DisplayName ? -1 : 1; });
     simpleForm({ title: c ? 'Edit campaign' : 'Add campaign', rec: c, idKey: 'CampaignID', action: 'saveCampaign', done: 'Campaign saved.', fields: [
       { k: 'Name', label: 'Name', req: true, max: 80 }, { k: 'Status', label: 'Status', type: 'select', options: opts(C.LISTS.ActiveStatus, c ? c.Status : 'Active') },
       { k: 'AccountManagerIDs', label: 'Account managers (accountable for this campaign)', type: 'checks', span: 'span2', options: amUsers().length ? amUsers().map(function (u) { return '<label class="check"><input type="checkbox" value="' + esc(u.UserID) + '"' + (cur.indexOf(u.UserID) >= 0 ? ' checked' : '') + '> ' + esc(u.DisplayName) + '</label>'; }).join('') : '<span class="muted small">Add users with the Account manager role first (Users and roles).</span>' },
+      { k: 'HRIDs', label: 'HR (IRs, grievances and separations for this campaign)', type: 'checks', span: 'span2', options: hrUsers.length ? hrUsers.map(function (u) { return '<label class="check"><input type="checkbox" value="' + esc(u.UserID) + '"' + (curHr.indexOf(u.UserID) >= 0 ? ' checked' : '') + '> ' + esc(u.DisplayName) + '</label>'; }).join('') : '<span class="muted small">Add users with the HR role first (Users and roles).</span>' },
       { k: 'Description', label: 'Notes', type: 'textarea', span: 'span2', max: 1000 }],
-      transform: function (r) { r.AccountManagerIDs = (r.AccountManagerIDs || []).join(','); } });
+      transform: function (r) { r.AccountManagerIDs = (r.AccountManagerIDs || []).join(','); r.HRIDs = (r.HRIDs || []).join(','); } });
   };
   ACT.editAgent = function (el) {
     var a = el && el.dataset.id ? ag(el.dataset.id) : null;
@@ -2584,11 +2589,10 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = MemoryRe
     simpleForm({ title: u ? 'Edit user' : 'Add user', rec: u, idKey: 'UserID', action: 'saveUser', done: 'User saved.', fields: [
       { k: 'Email', label: 'Company Google account email', type: 'email', req: true, disabled: self }, { k: 'DisplayName', label: 'Display name', req: true, max: 120 },
       { k: 'Role', label: 'Role', type: 'select', req: true, disabled: self, options: opts(C.ASSIGNABLE_ROLES.map(function (r) { return [r, C.ROLE_LABELS[r]]; }), u ? C.normRole(u.Role) : 'ACCOUNT_MANAGER'),
-        hint: 'Executive: view only, everything. Account manager: assign their campaigns under Campaigns. Supervisor: tick their campaigns below. HR: all campaigns; IRs, grievances and separations.' },
-      { k: 'CampaignIDs', label: 'Campaigns (Supervisors)', type: 'checks', span: 'span2', options: liveCamps().map(function (c) { return '<label class="check"><input type="checkbox" value="' + esc(c.CampaignID) + '"' + (cids.indexOf(c.CampaignID) >= 0 ? ' checked' : '') + '> ' + esc(c.Name) + '</label>'; }).join('') },
+        hint: 'Executive: view only, everything. Account manager and HR: assign their campaigns under Settings → Campaigns.' },
       { k: 'Active', label: 'Access', type: 'bool', text: 'Active (can sign in)', def: true, disabled: self }],
       extra: self ? '<div class="note" style="margin-top:12px">Your own role, email and access can only be changed by another Admin.</div>' : '',
-      transform: function (r) { r.CampaignIDs = (r.CampaignIDs || []).join(','); if (self) { delete r.Role; delete r.Active; delete r.Email; } } });
+      transform: function (r) { if (self) { delete r.Role; delete r.Active; delete r.Email; } } });
   };
   // ---------- score guide editor ----------
   function bandValue(v, format) { return format === 'time' ? C.fmtTime(v).replace(/^0:/, '') : String(v); }
